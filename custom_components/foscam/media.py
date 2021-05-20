@@ -1,10 +1,10 @@
-
 import os
-from datetime import datetime
+import subprocess
 
 from .const import (
     LOGGER
 )
+
 
 class Recording:
 
@@ -48,10 +48,10 @@ class Recording:
         if self._duration is None:
             if os.path.exists(self._recording):
                 result = subprocess.run(["ffprobe", "-v", "error", "-show_entries",
-                                            "format=duration", "-of",
-                                            "default=noprint_wrappers=1:nokey=1", self._recording],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT)
+                                         "format=duration", "-of",
+                                         "default=noprint_wrappers=1:nokey=1", self._recording],
+                                        stdout=subprocess.PIPE,
+                                        stderr=subprocess.STDOUT)
                 self._duration = int(result.stdout)
                 LOGGER.debug(f"duration of {self._remote_recording} is {self._duration}")
         if self._duration:

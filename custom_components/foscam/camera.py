@@ -24,6 +24,7 @@ from homeassistant.const import (
     CONF_PORT,
     CONF_USERNAME,
 )
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv, entity_platform
 from homeassistant.helpers.update_coordinator import (
     CoordinatorEntity,
@@ -90,10 +91,6 @@ SCHEMA_WS_LIBRARY = websocket_api.BASE_COMMAND_MESSAGE_SCHEMA.extend(
 RECORDING_URL = "/api/foscam_recording/{0}?index={1}&token={2}"
 RECORDING_THUMBNAIL_URL = "/api/foscam_snapshot/{0}?index={1}&token={2}"
 
-
-async def async_setup(hass, config):
-    LOGGER.info("here1!!!")
-    #eWebsockets
 
 async def async_setup_platform(hass, config, _async_add_entities, _discovery_info=None):
     """Set up a Foscam IP Camera."""
@@ -428,5 +425,4 @@ async def websocket_library(hass, connection, msg):
                 "Unable to fetch library ({})".format(str(error)),
             )
         )
-        _LOGGER.warning("{} library websocket failed".format(msg["entity_id"]))
-
+        LOGGER.warning("{} library websocket failed".format(msg["entity_id"]))

@@ -63,7 +63,6 @@ class Updater:
         self._last_capture_at = None
 
         today = datetime.now().strftime("%Y%m%d")
-        url_base = f"ftp://{self._camera.usr}:{self._camera.pwd}@{self._camera.host}:50021/IPCamera"
 
         recordings = []
         snapshots = {}
@@ -106,7 +105,6 @@ class Updater:
         ftp.close()
 
         self._recordings = sorted(recordings, key=lambda x: x.created_at, reverse=True)
-
         return 0
 
     def fetch_recordings(self):
