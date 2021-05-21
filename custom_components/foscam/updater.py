@@ -1,7 +1,10 @@
 import time
 import os
 import threading
-from datetime import datetime
+from datetime import (
+    datetime,
+    timedelta
+)
 
 from ftpretty import ftpretty
 
@@ -15,6 +18,7 @@ from .media import (
 CHECK_TIMEOUT = 2
 RECORDINGS_TIMEOUT = 60
 TMP_AVI = "/config/foscam/in.avi"
+CUT_OFF_SECONDS = 10
 
 
 class Updater:
@@ -23,30 +27,27 @@ class Updater:
     def __init__(self, hass, camera):
         self._hass = hass
         self._camera = camera
+
+        self._lock = threading.Lock()
+
+        # start up state
         self._last = 0
         self._last_recording = 0
         self._todays_count = 0
         self._last_capture_at = None
-        self._lock = threading.Lock()
-
-        # start up state
         self._state = {}
         self._recordings = []
 
     def get_datetime(self, filename):
-        filename = os.path.splitext(filename)[0]
-        filename = filename.split("_", 1)[1]
-        if "-" in filename:
-            return datetime.strptime(filename, "%Y%m%d-%H%M%S")
-        else:
-            return datetime.strptime(filename, "%Y%m%d_%H%M%S")
+        filename = os.path.splitext(os.path.basename(filename))[0]
+        filename = filename.replace("-", "_", 1).split("_", 1)[1]
+        return datetime.strptime(filename, "%Y%m%d_%H%M%S")
 
     def update_state(self):
         ret, self._state = self._camera.get_dev_state()
         return ret
 
     def update_recordings(self):
-
         res, devinfo = self._camera.get_dev_info()
         if res is not 0:
             LOGGER.error("failed to read device info")
@@ -59,10 +60,9 @@ class Updater:
         self._camera.execute_command('startFtpServer')
         ftp = ftpretty(self._camera.host, self._camera.usr, self._camera.pwd, port=50021)
 
+        today = datetime.today()
         self._todays_count = 0
         self._last_capture_at = None
-
-        today = datetime.now().strftime("%Y%m%d")
 
         recordings = []
         snapshots = {}
@@ -72,24 +72,27 @@ class Updater:
                 # Save out the snapshots.
                 for date1 in ftp.list(f"/IPCamera/{possible_dir}/snap"):
                     for date2 in ftp.list(f"/IPCamera/{possible_dir}/snap/{date1}"):
-                        for snapshot in ftp.list(f"/IPCamera/{possible_dir}/snap/{date1}/{date2}"):
-                            if not snapshot.endswith("jpg"):
+                        for snapshot in ftp.list(f"/IPCamera/{possible_dir}/snap/{date1}/{date2}", extra=True):
+                            if not snapshot['name'].endswith("jpg"):
                                 continue
 
-                            date = self.get_datetime(snapshot)
-                            snapshots[date] = f"/IPCamera/{possible_dir}/snap/{date1}/{date2}/{snapshot}"
+                            name = f"/IPCamera/{possible_dir}/snap/{date1}/{date2}/{snapshot['name']}"
+                            date = self.get_datetime(name)
+
+                            snapshots[date] = name
 
                 # Build recordings array.
                 for date1 in ftp.list(f"/IPCamera/{possible_dir}/record"):
                     for date2 in ftp.list(f"/IPCamera/{possible_dir}/record/{date1}"):
-                        for recording in ftp.list(f"/IPCamera/{possible_dir}/record/{date1}/{date2}"):
-                            if not recording.endswith("avi"):
+                        for recording in ftp.list(f"/IPCamera/{possible_dir}/record/{date1}/{date2}", extra=True):
+                            if not recording['name'].endswith("avi"):
                                 continue
 
-                            date = self.get_datetime(recording)
+                            name = f"/IPCamera/{possible_dir}/record/{date1}/{date2}/{recording['name']}"
+                            date = self.get_datetime(name)
 
                             # update counts
-                            if date.strftime("%Y%m%d") == today:
+                            if date.today() == today:
                                 self._todays_count += 1
                             if self._last_capture_at is None or self._last_capture_at < date:
                                 self._last_capture_at = date
@@ -99,8 +102,7 @@ class Updater:
                             if snapshot:
                                 snapshot = snapshots[snapshot[0]]
 
-                            remote_recording = f"/IPCamera/{possible_dir}/record/{date1}/{date2}/{recording}"
-                            recordings.append(Recording(date, remote_recording, snapshot))
+                            recordings.append(Recording(date, name, snapshot, recording['size']))
 
         ftp.close()
 
@@ -108,22 +110,41 @@ class Updater:
         return 0
 
     def fetch_recordings(self):
+        ftp = None
+        cut_off = datetime.now() - timedelta(seconds=CUT_OFF_SECONDS)
 
         for recording in self._recordings:
-            if not os.path.exists(recording.content_url):
+            if os.path.exists(recording.content_url):
+                continue
+
+            if not ftp:
                 self._camera.execute_command('startFtpServer')
                 ftp = ftpretty(self._camera.host, self._camera.usr, self._camera.pwd, port=50021)
 
-                LOGGER.debug(f"copying {recording.thumbnail_url}")
-                ftp.get(recording.remote_thumbnail_url, recording.thumbnail_url)
+            LOGGER.debug(f"checking {recording.content_url}")
+            ls = ftp.list(recording.remote_content_url, extra=True)
+            if not ls:
+                LOGGER.debug(" file disappeared?")
+                continue
+            ls = ls[0]
+            if ls['datetime'] > cut_off:
+                LOGGER.debug(" too new")
+                continue
 
-                LOGGER.debug(f"creating {recording.content_url}")
-                ftp.get(recording.remote_content_url, TMP_AVI)
-                os.system(f"ffmpeg -i {TMP_AVI} {recording.content_url}")
-                os.unlink(TMP_AVI)
+            LOGGER.debug(f"copying {recording.thumbnail_url}")
+            ftp.get(recording.remote_thumbnail_url, recording.thumbnail_url)
 
-                ftp.close()
-                return
+            LOGGER.debug(f"creating {recording.content_url}")
+            ftp.get(recording.remote_content_url, TMP_AVI)
+            rc = os.system(f"ffmpeg -i {TMP_AVI} {recording.content_url}")
+            if rc != 0:
+                LOGGER.warning(f"failed: ffmpeg -i {TMP_AVI} {recording.content_url}")
+            os.unlink(TMP_AVI)
+            LOGGER.debug(f"finished {recording.content_url}")
+            break
+
+        if ftp is not None:
+            ftp.close()
 
     def update_data(self):
         """Fetch data from camera endpoint

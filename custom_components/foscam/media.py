@@ -8,16 +8,17 @@ from .const import (
 
 class Recording:
 
-    def __init__(self, date, recording, snapshot):
-
-        self._remote_recording = recording
-        self._remote_snapshot = snapshot,
+    def __init__(self, date, recording, snapshot, size):
         self._date = date
-        self._duration = None
+        self._remote_recording = recording
+        self._remote_snapshot = snapshot
+        self._remote_size = size
 
         base = os.path.splitext(os.path.basename(recording))[0]
-        self._recording = f"/config/foscam/{base}.mp4"
-        self._snapshot = f"/config/foscam/{base}.jpg"
+        self._recording = f"foscam/{base}.mp4"
+        self._snapshot = f"foscam/{base}.jpg"
+
+        self._duration = None
         LOGGER.debug(f"Recording({self._recording})")
 
     @property
@@ -40,10 +41,6 @@ class Recording:
         return self._recording
 
     @property
-    def remote_content_url(self):
-        return self._remote_recording
-
-    @property
     def duration(self):
         if self._duration is None:
             if os.path.exists(self._recording):
@@ -52,7 +49,7 @@ class Recording:
                                          "default=noprint_wrappers=1:nokey=1", self._recording],
                                         stdout=subprocess.PIPE,
                                         stderr=subprocess.STDOUT)
-                self._duration = int(result.stdout)
+                self._duration = int(float(result.stdout))
                 LOGGER.debug(f"duration of {self._remote_recording} is {self._duration}")
         if self._duration:
             return self._duration
@@ -67,13 +64,21 @@ class Recording:
         return self._snapshot
 
     @property
-    def remote_thumbnail_url(self):
-        return self._remote_snapshot
-
-    @property
     def object_region(self):
         return None
 
     @property
     def object_type(self):
         return None
+
+    @property
+    def remote_content_url(self):
+        return self._remote_recording
+
+    @property
+    def remote_thumbnail_url(self):
+        return self._remote_snapshot
+
+    @property
+    def remote_size(self):
+        return self._remote_size
