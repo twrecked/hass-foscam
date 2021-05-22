@@ -18,9 +18,9 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
     await data["coordinator"].async_config_entry_first_refresh()
 
     entries = [
-        HassFoscamBinarySensor(data, config_entry, "motion_detected", "motion", "motion"),
-        HassFoscamBinarySensor(data, config_entry, "sound_detected", "sound", "sound"),
-        HassFoscamBinarySensor(data, config_entry, "io_detected", None, "io")
+        HassFoscamBinarySensor(data, config_entry, "motion", "motion"),
+        HassFoscamBinarySensor(data, config_entry, "sound", "sound"),
+        HassFoscamBinarySensor(data, config_entry, "io", None)
     ]
     async_add_entities(entries)
 
@@ -28,11 +28,11 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
 class HassFoscamBinarySensor(CoordinatorEntity, BinarySensorEntity):
     """An implementation of a Foscam IP camera."""
 
-    def __init__(self, data, config_entry, state_name, device_class, suffix):
+    def __init__(self, data, config_entry, state_name, device_class):
         super().__init__(data["coordinator"])
 
-        self._name = f"{config_entry.title} {suffix}"
-        self._unique_id = f"{config_entry.entry_id}_{suffix}"
+        self._name = f"{state_name} {config_entry.title}"
+        self._unique_id = f"{state_name}_{config_entry.entry_id}"
         self._state_name = state_name
         self._device_class = device_class
         LOGGER.info(f"starting {self._name}")

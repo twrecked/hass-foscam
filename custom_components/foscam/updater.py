@@ -19,6 +19,7 @@ CHECK_TIMEOUT = 2
 RECORDINGS_TIMEOUT = 60
 TMP_AVI = "/config/foscam/in.avi"
 CUT_OFF_SECONDS = 10
+RECENT_TIMEOUT = 30
 
 
 class Updater:
@@ -31,11 +32,13 @@ class Updater:
         self._lock = threading.Lock()
 
         # start up state
-        self._last = 0
+        self._state = "unknown"
+        self._last_update = 0
         self._last_recording = 0
         self._todays_count = 0
         self._last_capture_at = None
-        self._state = {}
+        self._last_activity = 0.0
+        self._dev_state = {}
         self._recordings = []
 
     def get_datetime(self, filename):
@@ -43,9 +46,31 @@ class Updater:
         filename = filename.replace("-", "_", 1).split("_", 1)[1]
         return datetime.strptime(filename, "%Y%m%d_%H%M%S")
 
-    def update_state(self):
-        ret, self._state = self._camera.get_dev_state()
+    def update_dev_state(self):
+        ret, self._dev_state = self._camera.get_dev_state()
         return ret
+
+    def update_state(self):
+        state = "idle"
+
+        # Doing something?
+        if self._dev_state.get("recording", "0") == "1":
+            state = "recording"
+        elif self._dev_state["motionDetectAlarm"] == "2":
+            state = "motion"
+
+        # Not doing something.But were we?
+        elif self._state != "idle":
+            if self._state != "recently active":
+                state = "recently active"
+                self._last_activity = time.monotonic()
+            elif (self._last_activity + RECENT_TIMEOUT) > time.monotonic():
+                state = "recently active"
+            else:
+                self._last_activity = 0.0
+
+        # Set the new state
+        self._state = state
 
     def update_recordings(self):
         res, devinfo = self._camera.get_dev_info()
@@ -60,7 +85,7 @@ class Updater:
         self._camera.execute_command('startFtpServer')
         ftp = ftpretty(self._camera.host, self._camera.usr, self._camera.pwd, port=50021)
 
-        today = datetime.today()
+        today = datetime.now().date()
         self._todays_count = 0
         self._last_capture_at = None
 
@@ -92,7 +117,8 @@ class Updater:
                             date = self.get_datetime(name)
 
                             # update counts
-                            if date.today() == today:
+                            LOGGER.debug(f"t1={date.date()},t2={today}")
+                            if date.date() == today:
                                 self._todays_count += 1
                             if self._last_capture_at is None or self._last_capture_at < date:
                                 self._last_capture_at = date
@@ -121,7 +147,7 @@ class Updater:
                 self._camera.execute_command('startFtpServer')
                 ftp = ftpretty(self._camera.host, self._camera.usr, self._camera.pwd, port=50021)
 
-            LOGGER.debug(f"checking {recording.content_url}")
+            LOGGER.debug(f"checking {recording.content_url}/{recording.remote_size}")
             ls = ftp.list(recording.remote_content_url, extra=True)
             if not ls:
                 LOGGER.debug(" file disappeared?")
@@ -130,6 +156,13 @@ class Updater:
             if ls['datetime'] > cut_off:
                 LOGGER.debug(" too new")
                 continue
+            if ls['size'] == 0:
+                LOGGER.debug(" nothing in it")
+                continue
+            if ls['size'] != recording.remote_size:
+                LOGGER.debug(" size changed!")
+                recording.update_remote_size(ls['size'])
+                continue
 
             LOGGER.debug(f"copying {recording.thumbnail_url}")
             ftp.get(recording.remote_thumbnail_url, recording.thumbnail_url)
@@ -137,10 +170,12 @@ class Updater:
             LOGGER.debug(f"creating {recording.content_url}")
             ftp.get(recording.remote_content_url, TMP_AVI)
             rc = os.system(f"ffmpeg -i {TMP_AVI} {recording.content_url}")
+            os.unlink(TMP_AVI)
             if rc != 0:
                 LOGGER.warning(f"failed: ffmpeg -i {TMP_AVI} {recording.content_url}")
-            os.unlink(TMP_AVI)
-            LOGGER.debug(f"finished {recording.content_url}")
+                os.unlink(recording.content_url)
+            else:
+                LOGGER.debug(f"finished {recording.content_url}")
             break
 
         if ftp is not None:
@@ -153,48 +188,53 @@ class Updater:
             now = time.monotonic()
 
             # too soon?
-            if self._last + CHECK_TIMEOUT > now:
-                LOGGER.debug(f"too soon to update {self._last} -- {now}")
+            if self._last_update + CHECK_TIMEOUT > now:
+                LOGGER.debug(f"too soon to update {self._last_update} -- {now}")
                 return
 
             # save pre-update state
-            motion_detected = self._state.get("motionDetectAlarm", "0") == "2"
+            recording = self._dev_state.get("recording", "0") == "1"
 
             LOGGER.debug("update state")
+            self.update_dev_state()
             self.update_state()
 
             # check post-update state
-            if motion_detected and self._state.get("motionDetectAlarm", "0") != "2":
-                LOGGER.debug("force recording update")
+            if recording and self._dev_state.get("recording", "0") != "1":
+                LOGGER.debug("recording stopped, forcing update")
                 self._last_recording = 0
 
             # check recordings
+            # do in the background
             if (self._last_recording + RECORDINGS_TIMEOUT) < now:
                 LOGGER.debug("update recordings")
                 self.update_recordings()
                 self._last_recording = now
 
             # grab one recording per go after initial setup
-            if self._last != 0:
+            if self._last_update != 0:
                 self.fetch_recordings()
 
-            self._last = now
+            self._last_update = now
 
     async def async_update_data(self):
         await self._hass.async_add_executor_job(
             self.update_data
         )
         data = {
-            "motion_status": self._state["motionDetectAlarm"] != "0",
-            "motion_detected": self._state["motionDetectAlarm"] == "2",
-            "sound_status": self._state["soundAlarm"] == "0",
-            "sound_detected": self._state["soundAlarm"] == "2",
-            "io_status": self._state["IOAlarm"] == "0",
-            "io_detected": self._state["IOAlarm"] == "2",
+            "motion_status": self._dev_state["motionDetectAlarm"] != "0",
+            "motion": self._dev_state["motionDetectAlarm"] == "2",
+            "sound_status": self._dev_state["soundAlarm"] == "0",
+            "sound": self._dev_state["soundAlarm"] == "2",
+            "io_status": self._dev_state["IOAlarm"] == "0",
+            "io": self._dev_state["IOAlarm"] == "2",
+            "recording": self._dev_state["record"] == "1",
 
             "recordings": self._recordings,
-            "last_capture": self._last_capture_at.strftime("%Y-%m-%dT%H:%M:%S"),
+            "last": self._last_capture_at.strftime("%Y-%m-%dT%H:%M:%S"),
             "captured_today": self._todays_count,
-            "captured_total": len(self._recordings)
+            "captured_total": len(self._recordings),
+
+            "state": self._state
         }
         return data

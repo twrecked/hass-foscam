@@ -1,5 +1,6 @@
 """This component provides basic support for Foscam IP cameras."""
 import asyncio
+from datetime import datetime
 
 from aiohttp import web
 from contextlib import suppress
@@ -180,12 +181,18 @@ class HassFoscamCamera(CoordinatorEntity, Camera):
         self._unique_id = config_entry.entry_id
         self._rtsp_port = config_entry.data[CONF_RTSP_PORT]
 
+        self._image_source = None
+
         LOGGER.info(f"starting {self._name}")
 
     @property
     def unique_id(self):
         """Return the entity unique ID."""
         return self._unique_id
+
+    @property
+    def state(self):
+        return self.coordinator.data["state"]
 
     def camera_image(self):
         """Return a still image response from the camera."""
@@ -195,6 +202,7 @@ class HassFoscamCamera(CoordinatorEntity, Camera):
         if result != 0:
             return None
 
+        self._image_source = "capture/" + datetime.now().strftime("%m-%d %H:%M:%S")
         return response
 
     def recording_image(self, index):
@@ -336,14 +344,17 @@ class HassFoscamCamera(CoordinatorEntity, Camera):
         return self.coordinator.data["recordings"][:at_most]
 
     @property
+    def image_source(self):
+        return self._image_source
+
+    @property
     def extra_state_attributes(self):
         """Return the state attributes."""
         attrs = {
-            "token2": self.access_tokens[-1],
-            "last_recording": RECORDING_URL.format(self.entity_id, 0, self.access_tokens[-1]),
+            "last_video": RECORDING_URL.format(self.entity_id, 0, self.access_tokens[-1]),
             "last_thumbnail": RECORDING_THUMBNAIL_URL.format(self.entity_id, 0, self.access_tokens[-1]),
-            "last_recording1": RECORDING_URL.format(self.entity_id, 1, self.access_tokens[-1]),
-            "last_thumbnail1": RECORDING_THUMBNAIL_URL.format(self.entity_id, 1, self.access_tokens[-1]),
+            "image_source": self.image_source,
+            "state": self.state,
         }
         return attrs
 
@@ -393,22 +404,25 @@ async def websocket_library(hass, connection, msg):
 
         videos = []
         LOGGER.debug("library+" + str(msg["at_most"]))
+        count = 0
         for v in camera.last_n_videos(msg["at_most"]):
             videos.append(
                 {
                     "created_at": v.created_at,
                     "created_at_pretty": v.created_at_pretty(),
                     "duration": v.duration,
-                    "url": v.video_url,
+                    "url": RECORDING_URL.format(msg['entity_id'], count, camera.access_tokens[-1]),
                     "url_type": v.content_type,
-                    "thumbnail": v.thumbnail_url,
-                    "thumbnail_type": "image/jpeg",
+                    "thumbnail": RECORDING_THUMBNAIL_URL.format(msg['entity_id'], count, camera.access_tokens[-1]),
+                    "thumbnail_type": v.thumbnail_type,
                     "object": v.object_type,
                     "object_region": v.object_region,
                     "trigger": v.object_type,
                     "trigger_region": v.object_region,
                 }
             )
+            count += 1
+
         connection.send_message(
             websocket_api.result_message(
                 msg["id"],

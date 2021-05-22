@@ -18,7 +18,7 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
     await data["coordinator"].async_config_entry_first_refresh()
 
     entries = [
-            HassFoscamSensor(data, config_entry, "last_capture", "mdi:fast-run"),
+            HassFoscamSensor(data, config_entry, "last", "mdi:fast-run"),
             HassFoscamSensor(data, config_entry, "captured_today", "mdi:file-video"),
             HassFoscamSensor(data, config_entry, "captured_total", "mdi:file-video")
     ]
@@ -31,8 +31,8 @@ class HassFoscamSensor(CoordinatorEntity, Entity):
     def __init__(self, data, config_entry, state_name, icon):
         super().__init__(data["coordinator"])
 
-        self._name = f"{config_entry.title} {state_name}"
-        self._unique_id = f"{config_entry.entry_id}_{state_name}"
+        self._name = f"{state_name} {config_entry.title}"
+        self._unique_id = f"{state_name}_{config_entry.entry_id}"
         self._state_name = state_name
         self._icon = icon
         LOGGER.info(f"starting {self._name}")

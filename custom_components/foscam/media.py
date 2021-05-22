@@ -8,6 +8,8 @@ from .const import (
 
 class Recording:
 
+    _last_duration = None
+
     def __init__(self, date, recording, snapshot, size):
         self._date = date
         self._remote_recording = recording
@@ -30,7 +32,7 @@ class Recording:
         """Returns date video was taken formated with `last_date_format`"""
         if date_format:
             return self._date.strftime(date_format)
-        return self._date().strftime("%Y-%m-%dT%H:%M:%S")
+        return self._date.strftime("%m-%d %H:%M:%S")
 
     @property
     def content_type(self):
@@ -44,13 +46,19 @@ class Recording:
     def duration(self):
         if self._duration is None:
             if os.path.exists(self._recording):
-                result = subprocess.run(["ffprobe", "-v", "error", "-show_entries",
-                                         "format=duration", "-of",
-                                         "default=noprint_wrappers=1:nokey=1", self._recording],
-                                        stdout=subprocess.PIPE,
-                                        stderr=subprocess.STDOUT)
-                self._duration = int(float(result.stdout))
-                LOGGER.debug(f"duration of {self._remote_recording} is {self._duration}")
+                try:
+                    result = subprocess.run(["ffprobe", "-v", "error", "-show_entries",
+                                             "format=duration", "-of",
+                                             "default=noprint_wrappers=1:nokey=1", self._recording],
+                                            stdout=subprocess.PIPE,
+                                            stderr=subprocess.STDOUT)
+                    out = result.stdout
+                    self._duration = int(float(result.stdout))
+                    self._last_duration = self._duration
+                    LOGGER.debug(f"duration of {self._remote_recording} is {self._duration}")
+                except ValueError:
+                    LOGGER.debug(f"duration of {self._remote_recording} failed on {out}")
+                    self._duration = self._last_duration
         if self._duration:
             return self._duration
         return 1
@@ -82,3 +90,10 @@ class Recording:
     @property
     def remote_size(self):
         return self._remote_size
+
+    def update_remote_size(self, size):
+        self._remote_size = size
+
+    @property
+    def image_source(self):
+        return "capture/" + self._date.strftime("%m-%d %H:%M:%S")
