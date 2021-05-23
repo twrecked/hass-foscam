@@ -8,9 +8,6 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_PORT, CONF_USERNAME
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_registry import async_migrate_entries
-from homeassistant.helpers.update_coordinator import (
-    DataUpdateCoordinator,
-)
 
 from .updater import Updater
 from .config_flow import DEFAULT_RTSP_PORT
@@ -32,14 +29,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
             verbose=True,
             )
 
-    camera_updater = Updater(hass, camera)
-
-    coordinator = DataUpdateCoordinator(
+    coordinator = Updater(
         hass,
-        LOGGER,
-        name="foscam",
-        update_method=camera_updater.async_update_data,
-        update_interval=timedelta(seconds=5),
+        camera,
+        5,
     )
 
     hass.data.setdefault(DOMAIN, {})
@@ -47,6 +40,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
             "camera": camera,
             "coordinator": coordinator
     }
+
+    await coordinator.async_config_entry_first_refresh()
 
     """Set up foscam entries from a config entry."""
     hass.config_entries.async_setup_platforms(entry, PLATFORMS)

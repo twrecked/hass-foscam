@@ -117,7 +117,6 @@ async def async_setup_platform(hass, config, _async_add_entities, _discovery_inf
 
 
 async def async_setup_entry(hass, config_entry, async_add_entities):
-    LOGGER.info("here2!!!")
 
     component = hass.data["camera"]
     hass.http.register_view(HassFoscamCameraImageView(component))
@@ -157,10 +156,6 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
     )
 
     data = hass.data[DOMAIN][config_entry.entry_id]
-
-    LOGGER.info("first start")
-    await data["coordinator"].async_config_entry_first_refresh()
-    LOGGER.info("first end")
 
     async_add_entities([HassFoscamCamera(data, config_entry)])
 

@@ -8,6 +8,9 @@ from datetime import (
 
 from ftpretty import ftpretty
 
+from homeassistant.helpers.update_coordinator import (
+    DataUpdateCoordinator,
+)
 from .const import (
     LOGGER
 )
@@ -22,14 +25,20 @@ CUT_OFF_SECONDS = 10
 RECENT_TIMEOUT = 30
 
 
-class Updater:
+class Updater(DataUpdateCoordinator):
     """An implementation of a camera state updater."""
 
-    def __init__(self, hass, camera):
-        self._hass = hass
-        self._camera = camera
+    def __init__( self, hass, camera, polling_interval):
+        """Initialize a Foscam camera data updater."""
 
-        self._lock = threading.Lock()
+        super().__init__(
+            hass=hass,
+            logger=LOGGER,
+            name="FoscamUpdater",
+            update_interval=timedelta(seconds=polling_interval),
+        )
+
+        self._camera = camera
 
         # start up state
         self._state = "unknown"
@@ -86,8 +95,8 @@ class Updater:
         ftp = ftpretty(self._camera.host, self._camera.usr, self._camera.pwd, port=50021)
 
         today = datetime.now().date()
-        self._todays_count = 0
-        self._last_capture_at = None
+        todays_count = 0
+        last_capture_at = None
 
         recordings = []
         snapshots = {}
@@ -119,9 +128,9 @@ class Updater:
                             # update counts
                             LOGGER.debug(f"t1={date.date()},t2={today}")
                             if date.date() == today:
-                                self._todays_count += 1
-                            if self._last_capture_at is None or self._last_capture_at < date:
-                                self._last_capture_at = date
+                                todays_count += 1
+                            if last_capture_at is None or last_capture_at < date:
+                                last_capture_at = date
 
                             # find a thumbnail
                             snapshot = [k for k in sorted(snapshots.keys()) if k > date]
@@ -133,9 +142,13 @@ class Updater:
         ftp.close()
 
         self._recordings = sorted(recordings, key=lambda x: x.created_at, reverse=True)
+        self._todays_count = todays_count
+        if last_capture_at is not None:
+            self._last_capture_at = last_capture_at.strftime("%Y-%m-%dT%H:%M:%S")
         return 0
 
     def fetch_recordings(self):
+        LOGGER.debug("fetch recordings")
         ftp = None
         cut_off = datetime.now() - timedelta(seconds=CUT_OFF_SECONDS)
 
@@ -184,44 +197,38 @@ class Updater:
     def update_data(self):
         """Fetch data from camera endpoint
         """
-        with self._lock:
-            now = time.monotonic()
+        now = time.monotonic()
 
-            # too soon?
-            if self._last_update + CHECK_TIMEOUT > now:
-                LOGGER.debug(f"too soon to update {self._last_update} -- {now}")
-                return
+        # save pre-update state
+        recording = self._dev_state.get("recording", "0") == "1"
 
-            # save pre-update state
-            recording = self._dev_state.get("recording", "0") == "1"
+        # update
+        LOGGER.debug("update state")
+        self.update_dev_state()
+        self.update_state()
 
-            LOGGER.debug("update state")
-            self.update_dev_state()
-            self.update_state()
+        # check post-update state
+        if recording and self._dev_state.get("recording", "0") != "1":
+            LOGGER.debug("recording stopped, forcing update")
+            self._last_recording = 0
 
-            # check post-update state
-            if recording and self._dev_state.get("recording", "0") != "1":
-                LOGGER.debug("recording stopped, forcing update")
-                self._last_recording = 0
+        # check recordings
+        if (self._last_recording + RECORDINGS_TIMEOUT) < now:
+            LOGGER.debug("update recordings")
+            self.update_recordings()
+            self._last_recording = now
 
-            # check recordings
-            # do in the background
-            if (self._last_recording + RECORDINGS_TIMEOUT) < now:
-                LOGGER.debug("update recordings")
-                self.update_recordings()
-                self._last_recording = now
+        # grab one recording per go after initial setup
+        if self._last_update != 0:
+            self.fetch_recordings()
 
-            # grab one recording per go after initial setup
-            if self._last_update != 0:
-                self.fetch_recordings()
+        self._last_update = now
 
-            self._last_update = now
-
-    async def async_update_data(self):
-        await self._hass.async_add_executor_job(
+    async def _async_update_data(self):
+        await self.hass.async_add_executor_job(
             self.update_data
         )
-        data = {
+        return {
             "motion_status": self._dev_state["motionDetectAlarm"] != "0",
             "motion": self._dev_state["motionDetectAlarm"] == "2",
             "sound_status": self._dev_state["soundAlarm"] == "0",
@@ -231,10 +238,9 @@ class Updater:
             "recording": self._dev_state["record"] == "1",
 
             "recordings": self._recordings,
-            "last": self._last_capture_at.strftime("%Y-%m-%dT%H:%M:%S"),
+            "last": self._last_capture_at,
             "captured_today": self._todays_count,
             "captured_total": len(self._recordings),
 
             "state": self._state
         }
-        return data

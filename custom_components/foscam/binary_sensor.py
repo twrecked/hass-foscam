@@ -15,8 +15,6 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
 
     data = hass.data[DOMAIN][config_entry.entry_id]
 
-    await data["coordinator"].async_config_entry_first_refresh()
-
     entries = [
         HassFoscamBinarySensor(data, config_entry, "motion", "motion"),
         HassFoscamBinarySensor(data, config_entry, "sound", "sound"),
