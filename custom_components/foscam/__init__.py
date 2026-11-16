@@ -1,33 +1,38 @@
 """The foscam component."""
 
-from datetime import timedelta
+import asyncio
+from pathlib import Path
 
-from libpyfoscam import FoscamCamera
+from foscam import FoscamCamera
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_PORT, CONF_USERNAME
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_registry import async_migrate_entries
 
-from .updater import Updater
 from .config_flow import DEFAULT_RTSP_PORT
 from .const import CONF_RTSP_PORT, DOMAIN, LOGGER, SERVICE_PTZ, SERVICE_PTZ_PRESET
+from .updater import Updater
 
 PLATFORMS = ["camera", "binary_sensor", "sensor"]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
-    """ Create camera and coordinator.
+    """Create camera and coordinator.
 
     Everything comes through a single camera entity.
     """
+    storage_dir = Path(hass.config.config_dir) / "foscam"
+
     camera = FoscamCamera(
-            entry.data[CONF_HOST],
-            entry.data[CONF_PORT],
-            entry.data[CONF_USERNAME],
-            entry.data[CONF_PASSWORD],
-            verbose=True,
-            )
+        host=entry.data[CONF_HOST],
+        port=entry.data[CONF_PORT],
+        username=entry.data[CONF_USERNAME],
+        password=entry.data[CONF_PASSWORD],
+        rtsp_port=entry.data.get(CONF_RTSP_PORT, DEFAULT_RTSP_PORT),
+        storage_dir=storage_dir,
+        verbose=False,
+    )
 
     coordinator = Updater(
         hass,
@@ -37,21 +42,35 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
 
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = {
-            "camera": camera,
-            "coordinator": coordinator
+        "camera": camera,
+        "coordinator": coordinator,
     }
 
     await coordinator.async_config_entry_first_refresh()
 
     """Set up foscam entries from a config entry."""
-    hass.config_entries.async_setup_platforms(entry, PLATFORMS)
+    if hasattr(hass.config_entries, "async_forward_entry_setups"):
+        await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    else:
+        hass.config_entries.async_setup_platforms(entry, PLATFORMS)
 
     return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry):
     """Unload a config entry."""
-    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    if hasattr(hass.config_entries, "async_unload_platforms"):
+        unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    else:
+        unload_ok = all(
+            await asyncio.gather(
+                *[
+                    hass.config_entries.async_forward_entry_unload(entry, platform)
+                    for platform in PLATFORMS
+                ]
+            )
+        )
+
     if unload_ok:
         hass.data[DOMAIN].pop(entry.entry_id)
 
@@ -76,21 +95,20 @@ async def async_migrate_entry(hass, config_entry: ConfigEntry):
 
         config_entry.unique_id = None
 
-        # Get RTSP port from the camera or use the fallback one and store it in data
+        # Get RTSP port from the camera or use fallback
         camera = FoscamCamera(
-            config_entry.data[CONF_HOST],
-            config_entry.data[CONF_PORT],
-            config_entry.data[CONF_USERNAME],
-            config_entry.data[CONF_PASSWORD],
+            host=config_entry.data[CONF_HOST],
+            port=config_entry.data[CONF_PORT],
+            username=config_entry.data[CONF_USERNAME],
+            password=config_entry.data[CONF_PASSWORD],
             verbose=False,
         )
 
-        ret, response = await hass.async_add_executor_job(camera.get_port_info)
-
-        rtsp_port = DEFAULT_RTSP_PORT
-
-        if ret != 0:
-            rtsp_port = response.get("rtspPort") or response.get("mediaPort")
+        try:
+            info = await hass.async_add_executor_job(camera.get_info)
+            rtsp_port = info.get("rtspPort") or DEFAULT_RTSP_PORT
+        except Exception:
+            rtsp_port = DEFAULT_RTSP_PORT
 
         config_entry.data = {**config_entry.data, CONF_RTSP_PORT: rtsp_port}
 

@@ -1,22 +1,21 @@
 """This component provides basic support for Foscam IP cameras."""
+from __future__ import annotations
+
 import asyncio
+from contextlib import suppress
 from datetime import datetime
+from typing import Any
 
 from aiohttp import web
-from contextlib import suppress
-import async_timeout
 import voluptuous as vol
 
 from homeassistant.components import websocket_api
 from homeassistant.components.camera import (
     PLATFORM_SCHEMA,
-    SUPPORT_STREAM,
     Camera,
-    CameraView
+    CameraView,
 )
-from homeassistant.components.camera.const import (
-    CAMERA_IMAGE_TIMEOUT,
-)
+from homeassistant.components.camera.const import CAMERA_IMAGE_TIMEOUT
 from homeassistant.config_entries import SOURCE_IMPORT
 from homeassistant.const import (
     CONF_HOST,
@@ -27,9 +26,14 @@ from homeassistant.const import (
 )
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv, entity_platform
-from homeassistant.helpers.update_coordinator import (
-    CoordinatorEntity,
-)
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
+
+try:
+    from homeassistant.components.camera import CameraEntityFeature
+    STREAM_FEATURE = CameraEntityFeature.STREAM
+except (ImportError, AttributeError):
+    from homeassistant.components.camera import SUPPORT_STREAM
+    STREAM_FEATURE = SUPPORT_STREAM
 
 from .const import (
     CONF_RTSP_PORT,
@@ -55,30 +59,27 @@ DIR_UP = "up"
 DIR_DOWN = "down"
 DIR_LEFT = "left"
 DIR_RIGHT = "right"
-
 DIR_TOPLEFT = "top_left"
 DIR_TOPRIGHT = "top_right"
 DIR_BOTTOMLEFT = "bottom_left"
 DIR_BOTTOMRIGHT = "bottom_right"
 
-MOVEMENT_ATTRS = {
-    DIR_UP: "ptz_move_up",
-    DIR_DOWN: "ptz_move_down",
-    DIR_LEFT: "ptz_move_left",
-    DIR_RIGHT: "ptz_move_right",
-    DIR_TOPLEFT: "ptz_move_top_left",
-    DIR_TOPRIGHT: "ptz_move_top_right",
-    DIR_BOTTOMLEFT: "ptz_move_bottom_left",
-    DIR_BOTTOMRIGHT: "ptz_move_bottom_right",
-}
+VALID_MOVEMENTS = [
+    DIR_UP,
+    DIR_DOWN,
+    DIR_LEFT,
+    DIR_RIGHT,
+    DIR_TOPLEFT,
+    DIR_TOPRIGHT,
+    DIR_BOTTOMLEFT,
+    DIR_BOTTOMRIGHT,
+]
 
 DEFAULT_TRAVELTIME = 0.125
 
 ATTR_MOVEMENT = "movement"
 ATTR_TRAVELTIME = "travel_time"
 ATTR_PRESET_NAME = "preset_name"
-
-PTZ_GOTO_PRESET_COMMAND = "ptz_goto_preset"
 
 WS_TYPE_LIBRARY = "foscam_library"
 SCHEMA_WS_LIBRARY = websocket_api.BASE_COMMAND_MESSAGE_SCHEMA.extend(
@@ -89,12 +90,12 @@ SCHEMA_WS_LIBRARY = websocket_api.BASE_COMMAND_MESSAGE_SCHEMA.extend(
     }
 )
 
-RECORDING_URL = "/api/foscam_recording/{0}?index={1}&token={2}"
-RECORDING_THUMBNAIL_URL = "/api/foscam_snapshot/{0}?index={1}&token={2}"
+RECORDING_URL = "/api/foscam_recording/{0}?clip={1}&token={2}"
+RECORDING_THUMBNAIL_URL = "/api/foscam_snapshot/{0}?clip={1}&token={2}"
 
 
 async def async_setup_platform(hass, config, _async_add_entities, _discovery_info=None):
-    """Set up a Foscam IP Camera."""
+    """Set up a Foscam IP Camera (deprecated import)."""
     LOGGER.warning(
         "Loading foscam via platform config is deprecated, it will be automatically imported; Please remove it afterwards"
     )
@@ -117,7 +118,7 @@ async def async_setup_platform(hass, config, _async_add_entities, _discovery_inf
 
 
 async def async_setup_entry(hass, config_entry, async_add_entities):
-
+    """Set up Foscam camera from config entry."""
     component = hass.data["camera"]
     hass.http.register_view(HassFoscamCameraImageView(component))
     hass.http.register_view(HassFoscamCameraRecordingView(component))
@@ -125,23 +126,11 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
         WS_TYPE_LIBRARY, websocket_library, SCHEMA_WS_LIBRARY
     )
 
-    """Add a Foscam IP camera from a config entry."""
     platform = entity_platform.current_platform.get()
     platform.async_register_entity_service(
         SERVICE_PTZ,
         {
-            vol.Required(ATTR_MOVEMENT): vol.In(
-                [
-                    DIR_UP,
-                    DIR_DOWN,
-                    DIR_LEFT,
-                    DIR_RIGHT,
-                    DIR_TOPLEFT,
-                    DIR_TOPRIGHT,
-                    DIR_BOTTOMLEFT,
-                    DIR_BOTTOMRIGHT,
-                ]
-            ),
+            vol.Required(ATTR_MOVEMENT): vol.In(VALID_MOVEMENTS),
             vol.Optional(ATTR_TRAVELTIME, default=DEFAULT_TRAVELTIME): cv.small_float,
         },
         "async_perform_ptz",
@@ -156,7 +145,6 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
     )
 
     data = hass.data[DOMAIN][config_entry.entry_id]
-
     async_add_entities([HassFoscamCamera(data, config_entry)])
 
 
@@ -172,13 +160,12 @@ class HassFoscamCamera(CoordinatorEntity, Camera):
         self._name = config_entry.title
         self._username = config_entry.data[CONF_USERNAME]
         self._password = config_entry.data[CONF_PASSWORD]
-        self._stream = config_entry.data[CONF_STREAM]
+        self._stream = config_entry.data.get(CONF_STREAM, "Main")
         self._unique_id = config_entry.entry_id
-        self._rtsp_port = config_entry.data[CONF_RTSP_PORT]
+        self._rtsp_port = config_entry.data.get(CONF_RTSP_PORT)
 
         self._image_source = None
-
-        LOGGER.info(f"starting {self._name}")
+        LOGGER.info("Starting Foscam camera %s", self._name)
 
     @property
     def unique_id(self):
@@ -186,157 +173,82 @@ class HassFoscamCamera(CoordinatorEntity, Camera):
         return self._unique_id
 
     @property
+    def name(self):
+        """Return the name of this camera."""
+        return self._name
+
+    @property
     def state(self):
-        return self.coordinator.data["state"]
+        """Return device state string."""
+        return self.coordinator.data.get("state", "idle")
 
-    def camera_image(self):
-        """Return a still image response from the camera."""
-        # Send the request to snap a picture and return raw jpg data
-        # Handle exception if host is not reachable or url failed
-        result, response = self._foscam_session.snap_picture_2()
-        if result != 0:
-            return None
-
-        self._image_source = "capture/" + datetime.now().strftime("%m-%d %H:%M:%S")
-        return response
-
-    def recording_image(self, index):
+    def camera_image(self, width=None, height=None):
         """Return a still image response from the camera."""
         try:
-            with open(self.coordinator.data["recordings"][index].thumbnail_url, mode='rb') as file:
-                return file.read()
-        except:
+            data = self._foscam_session.get_snapshot()
+            self._image_source = "capture/" + datetime.now().strftime("%m-%d %H:%M:%S")
+            return data
+        except Exception as err:
+            LOGGER.debug("Snapshot failed on %s: %s", self._name, err)
             return None
-
-    async def async_recording_image(self, index):
-        """Return bytes of recording image."""
-        return await self.hass.async_add_executor_job(self.recording_image, index)
-
-    def recording(self, index):
-        """Return video response from the camera."""
-        filename = self.coordinator.data["recordings"][index].content_url
-        LOGGER.debug(f"trying {filename}")
-        try:
-            with open(self.coordinator.data["recordings"][index].content_url, mode='rb') as file:
-                return file.read()
-        except:
-            return None
-
-    async def async_recording(self, index):
-        """Return bytes of recording."""
-        return await self.hass.async_add_executor_job(self.recording, index)
 
     @property
     def supported_features(self):
         """Return supported features."""
         if self._rtsp_port:
-            return SUPPORT_STREAM
-
-        return None
+            return STREAM_FEATURE
+        return 0
 
     async def stream_source(self):
         """Return the stream source."""
         if self._rtsp_port:
-            return f"rtsp://{self._username}:{self._password}@{self._foscam_session.host}:{self._rtsp_port}/video{self._stream}"
+            return self._foscam_session.rtsp_url(stream=self._stream)
         return None
 
     @property
     def motion_detection_enabled(self):
         """Camera Motion Detection Status."""
-        return self.coordinator.data["motion_status"]
-
-    def enable_motion_detection(self):
-        """Enable motion detection in camera."""
-        try:
-            ret = self._foscam_session.enable_motion_detection()
-
-            if ret != 0:
-                if ret == -3:
-                    LOGGER.info(
-                        "Can't set motion detection status, camera %s configured with non-admin user",
-                        self._name,
-                    )
-                return
-
-        except TypeError:
-            LOGGER.debug(
-                "Failed enabling motion detection on '%s'. Is it supported by the device?",
-                self._name,
-            )
+        return self.coordinator.data.get("motion_status", False)
 
     async def async_enable_motion_detection(self):
-        """Call the job and enable motion detection."""
-        await self.hass.async_add_executor_job(self.enable_motion_detection)
-        await self.coordinator.async_request_refresh()
-
-    def disable_motion_detection(self):
-        """Disable motion detection."""
+        """Enable motion detection in camera."""
         try:
-            ret = self._foscam_session.disable_motion_detection()
-
-            if ret != 0:
-                if ret == -3:
-                    LOGGER.info(
-                        "Can't set motion detection status, camera %s configured with non-admin user",
-                        self._name,
-                    )
-                return
-
-        except TypeError:
-            LOGGER.debug(
-                "Failed disabling motion detection on '%s'. Is it supported by the device?",
-                self._name,
-            )
+            await self.hass.async_add_executor_job(self._foscam_session.enable_motion_detection)
+            await self.coordinator.async_request_refresh()
+        except Exception as err:
+            LOGGER.warning("Failed enabling motion detection on %s: %s", self._name, err)
 
     async def async_disable_motion_detection(self):
-        """Call the job and disable motion detection."""
-        await self.hass.async_add_executor_job(self.disable_motion_detection)
-        await self.coordinator.async_request_refresh()
+        """Disable motion detection."""
+        try:
+            await self.hass.async_add_executor_job(self._foscam_session.disable_motion_detection)
+            await self.coordinator.async_request_refresh()
+        except Exception as err:
+            LOGGER.warning("Failed disabling motion detection on %s: %s", self._name, err)
 
-    async def async_perform_ptz(self, movement, travel_time):
+    async def async_perform_ptz(self, movement: str, travel_time: float):
         """Perform a PTZ action on the camera."""
-        LOGGER.debug("PTZ action '%s' on %s", movement, self._name)
+        LOGGER.debug("PTZ action '%s' on %s (travel_time=%.2f)", movement, self._name, travel_time)
+        try:
+            await self.hass.async_add_executor_job(
+                self._foscam_session.ptz, movement, travel_time
+            )
+        except Exception as err:
+            LOGGER.error("Error moving %s '%s': %s", movement, self._name, err)
 
-        movement_function = getattr(self._foscam_session, MOVEMENT_ATTRS[movement])
-
-        ret, _ = await self.hass.async_add_executor_job(movement_function)
-
-        if ret != 0:
-            LOGGER.error("Error moving %s '%s': %s", movement, self._name, ret)
-            return
-
-        await asyncio.sleep(travel_time)
-
-        ret, _ = await self.hass.async_add_executor_job(
-            self._foscam_session.ptz_stop_run
-        )
-
-        if ret != 0:
-            LOGGER.error("Error stopping movement on '%s': %s", self._name, ret)
-            return
-
-    async def async_perform_ptz_preset(self, preset_name):
+    async def async_perform_ptz_preset(self, preset_name: str):
         """Perform a PTZ preset action on the camera."""
         LOGGER.debug("PTZ preset '%s' on %s", preset_name, self._name)
-
-        preset_function = getattr(self._foscam_session, PTZ_GOTO_PRESET_COMMAND)
-
-        ret, _ = await self.hass.async_add_executor_job(preset_function, preset_name)
-
-        if ret != 0:
-            LOGGER.error(
-                "Error moving to preset %s on '%s': %s", preset_name, self._name, ret
+        try:
+            await self.hass.async_add_executor_job(
+                self._foscam_session.ptz_preset, preset_name
             )
-            return
+        except Exception as err:
+            LOGGER.error("Error moving to preset %s on '%s': %s", preset_name, self._name, err)
 
-    @property
-    def name(self):
-        """Return the name of this camera."""
-        return self._name
-
-    def last_n_videos(self, at_most):
+    def last_n_videos(self, at_most: int):
         """Return video response from the camera."""
-        return self.coordinator.data["recordings"][:at_most]
+        return self.coordinator.data.get("recordings", [])[:at_most]
 
     @property
     def image_source(self):
@@ -345,70 +257,121 @@ class HassFoscamCamera(CoordinatorEntity, Camera):
     @property
     def extra_state_attributes(self):
         """Return the state attributes."""
-        attrs = {
-            "last_video": RECORDING_URL.format(self.entity_id, 0, self.access_tokens[-1]),
-            "last_thumbnail": RECORDING_THUMBNAIL_URL.format(self.entity_id, 0, self.access_tokens[-1]),
+        recordings = self.coordinator.data.get("recordings", [])
+        first_id = recordings[0].clip_id if recordings else "0"
+        token = self.access_tokens[-1] if self.access_tokens else ""
+
+        return {
+            "last_video": RECORDING_URL.format(self.entity_id, first_id, token),
+            "last_thumbnail": RECORDING_THUMBNAIL_URL.format(self.entity_id, first_id, token),
             "image_source": self.image_source,
             "state": self.state,
         }
-        return attrs
 
 
 class HassFoscamCameraImageView(CameraView):
-    """Camera view to serve an image."""
+    """Camera view to serve a recording thumbnail or live snapshot."""
 
     url = "/api/foscam_snapshot/{entity_id}"
     name = "api:foscam:image"
 
-    async def handle(self, request: web.Request, camera: HassFoscamCamera) -> web.Response:
-        """Serve camera image."""
-        with suppress(asyncio.CancelledError, asyncio.TimeoutError):
-            index = int(request.query.get("index", "0"))
-            async with async_timeout.timeout(CAMERA_IMAGE_TIMEOUT):
-                image = await camera.async_recording_image(index)
+    async def handle(self, request: web.Request, camera: HassFoscamCamera) -> web.StreamResponse:
+        """Serve thumbnail image."""
+        try:
+            clip_id = request.query.get("clip")
+            rec = None
+            recordings = camera.coordinator.data.get("recordings", [])
 
+            if clip_id:
+                rec = next((r for r in recordings if r.clip_id == clip_id), None)
+            elif "index" in request.query:
+                try:
+                    index = int(request.query.get("index", "0"))
+                    if 0 <= index < len(recordings):
+                        rec = recordings[index]
+                except (ValueError, TypeError):
+                    pass
+
+            if rec and rec.is_thumbnail_downloaded:
+                return web.FileResponse(path=rec.local_thumbnail_path, headers={"Content-Type": "image/jpeg"})
+
+            # Fallback to camera snapshot
+            image = await camera.async_camera_image()
             if image:
-                return web.Response(body=image, content_type=camera.content_type)
+                return web.Response(body=image, content_type="image/jpeg")
 
-        raise web.HTTPInternalServerError()
+        except Exception as err:
+            LOGGER.debug("Error serving thumbnail for %s: %s", camera.entity_id, err)
+
+        raise web.HTTPNotFound()
 
 
 class HassFoscamCameraRecordingView(CameraView):
-    """Camera view to serve a recording."""
+    """Camera view to serve a recording with range request streaming."""
 
     url = "/api/foscam_recording/{entity_id}"
     name = "api:foscam:recording"
 
-    async def handle(self, request: web.Request, camera: HassFoscamCamera) -> web.Response:
-        """Serve camera image."""
-        with suppress(asyncio.CancelledError, asyncio.TimeoutError):
-            index = int(request.query.get("index", "0"))
-            async with async_timeout.timeout(CAMERA_IMAGE_TIMEOUT):
-                image = await camera.async_recording(index)
+    async def handle(self, request: web.Request, camera: HassFoscamCamera) -> web.StreamResponse:
+        """Serve video file supporting HTTP range requests."""
+        try:
+            clip_id = request.query.get("clip")
+            rec = None
+            recordings = camera.coordinator.data.get("recordings", [])
 
-            if image:
-                return web.Response(body=image, content_type="video/mp4")
+            if clip_id:
+                rec = next((r for r in recordings if r.clip_id == clip_id), None)
+            elif "index" in request.query:
+                try:
+                    index = int(request.query.get("index", "0"))
+                    if 0 <= index < len(recordings):
+                        rec = recordings[index]
+                except (ValueError, TypeError):
+                    pass
 
-        raise web.HTTPInternalServerError()
+            if rec is None and recordings:
+                rec = recordings[0]
+
+            if rec:
+                # Ensure local video file is downloaded
+                if not rec.is_downloaded and not rec.is_raw_downloaded:
+                    try:
+                        await camera.hass.async_add_executor_job(
+                            camera._foscam_session.media.download_recording, rec
+                        )
+                    except Exception as err:
+                        LOGGER.warning("On-demand download failed for %s: %s", rec.clip_id, err)
+                        raise web.HTTPNotFound()
+
+                video_path = rec.local_video_path if rec.is_downloaded else rec.local_raw_path
+                if video_path.is_file():
+                    content_type = "video/mp4" if rec.is_downloaded else "video/x-msvideo"
+                    return web.FileResponse(path=video_path, headers={"Content-Type": content_type})
+
+        except Exception as err:
+            LOGGER.debug("Error serving video for %s: %s", camera.entity_id, err)
+
+        raise web.HTTPNotFound()
 
 
 @websocket_api.async_response
 async def websocket_library(hass, connection, msg):
+    """Websocket command returning library video catalog."""
     try:
         camera = hass.data["camera"].get_entity(msg["entity_id"])
+        token = camera.access_tokens[-1] if camera.access_tokens else ""
 
         videos = []
-        LOGGER.debug("library+" + str(msg["at_most"]))
-        count = 0
+        LOGGER.debug("foscam_library requested at_most=%s", msg.get("at_most"))
         for v in camera.last_n_videos(msg["at_most"]):
             videos.append(
                 {
-                    "created_at": v.created_at,
+                    "created_at": v.created_at.isoformat() if hasattr(v.created_at, "isoformat") else str(v.created_at),
                     "created_at_pretty": v.created_at_pretty(),
                     "duration": v.duration,
-                    "url": RECORDING_URL.format(msg['entity_id'], count, camera.access_tokens[-1]),
+                    "url": RECORDING_URL.format(msg["entity_id"], v.clip_id, token),
                     "url_type": v.content_type,
-                    "thumbnail": RECORDING_THUMBNAIL_URL.format(msg['entity_id'], count, camera.access_tokens[-1]),
+                    "thumbnail": RECORDING_THUMBNAIL_URL.format(msg["entity_id"], v.clip_id, token),
                     "thumbnail_type": v.thumbnail_type,
                     "object": v.object_type,
                     "object_region": v.object_region,
@@ -416,7 +379,6 @@ async def websocket_library(hass, connection, msg):
                     "trigger_region": v.object_region,
                 }
             )
-            count += 1
 
         connection.send_message(
             websocket_api.result_message(
@@ -426,12 +388,12 @@ async def websocket_library(hass, connection, msg):
                 },
             )
         )
-    except HomeAssistantError as error:
+    except Exception as error:
         connection.send_message(
             websocket_api.error_message(
                 msg["id"],
                 "library_ws",
-                "Unable to fetch library ({})".format(str(error)),
+                f"Unable to fetch library ({error})",
             )
         )
-        LOGGER.warning("{} library websocket failed".format(msg["entity_id"]))
+        LOGGER.warning("%s library websocket failed: %s", msg.get("entity_id"), error)

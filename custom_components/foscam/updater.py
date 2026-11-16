@@ -1,36 +1,27 @@
+"""An implementation of a camera state and media updater using pyfoscam."""
+from __future__ import annotations
+
+import logging
 import time
-import os
-import threading
-from datetime import (
-    datetime,
-    timedelta
-)
+from datetime import timedelta
+from typing import TYPE_CHECKING, Any
 
-from ftpretty import ftpretty
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
-from homeassistant.helpers.update_coordinator import (
-    DataUpdateCoordinator,
-)
-from .const import (
-    LOGGER
-)
-from .media import (
-    Recording
-)
+from .const import LOGGER
 
-CHECK_TIMEOUT = 2
+if TYPE_CHECKING:
+    from foscam import FoscamCamera
+
 RECORDINGS_TIMEOUT = 60
-TMP_AVI = "/config/foscam/in.avi"
-CUT_OFF_SECONDS = 10
 RECENT_TIMEOUT = 30
 
 
 class Updater(DataUpdateCoordinator):
-    """An implementation of a camera state updater."""
+    """Camera state and recordings updater."""
 
-    def __init__( self, hass, camera, polling_interval):
-        """Initialize a Foscam camera data updater."""
-
+    def __init__(self, hass, camera: FoscamCamera, polling_interval: int = 5) -> None:
+        """Initialize the coordinator."""
         super().__init__(
             hass=hass,
             logger=LOGGER,
@@ -39,208 +30,99 @@ class Updater(DataUpdateCoordinator):
         )
 
         self._camera = camera
+        self._media = camera.media
 
-        # start up state
+        # Runtime state
         self._state = "unknown"
-        self._last_update = 0
-        self._last_recording = 0
-        self._todays_count = 0
-        self._last_capture_at = None
+        self._last_update = 0.0
+        self._last_recordings_check = 0.0
         self._last_activity = 0.0
-        self._dev_state = {}
-        self._recordings = []
+        self._dev_state: dict[str, Any] = {}
 
-    def get_datetime(self, filename):
-        filename = os.path.splitext(os.path.basename(filename))[0]
-        filename = filename.replace("-", "_", 1).split("_", 1)[1]
-        return datetime.strptime(filename, "%Y%m%d_%H%M%S")
+    def _update_state(self) -> None:
+        """Calculate state machine transitions."""
+        is_rec = self._dev_state.get("is_recording", False)
+        is_motion = self._dev_state.get("motion_detected", False)
 
-    def update_dev_state(self):
-        ret, self._dev_state = self._camera.get_dev_state()
-        return ret
-
-    def update_state(self):
-        state = "idle"
-
-        # Doing something?
-        if self._dev_state.get("recording", "0") == "1":
+        if is_rec:
             state = "recording"
-        elif self._dev_state["motionDetectAlarm"] == "2":
+        elif is_motion:
             state = "motion"
-
-        # Not doing something.But were we?
         elif self._state != "idle":
+            now = time.monotonic()
             if self._state != "recently active":
                 state = "recently active"
-                self._last_activity = time.monotonic()
-            elif (self._last_activity + RECENT_TIMEOUT) > time.monotonic():
+                self._last_activity = now
+            elif (self._last_activity + RECENT_TIMEOUT) > now:
                 state = "recently active"
             else:
                 self._last_activity = 0.0
+                state = "idle"
+        else:
+            state = "idle"
 
-        # Set the new state
         self._state = state
 
-    def update_recordings(self):
-        res, devinfo = self._camera.get_dev_info()
-        if res is not 0:
-            LOGGER.error("failed to read device info")
-            return -1
-        mac = devinfo.get("mac", None)
-        if mac is None:
-            LOGGER.error("failed to read device mac")
-            return -1
-
-        self._camera.execute_command('startFtpServer')
-        ftp = ftpretty(self._camera.host, self._camera.usr, self._camera.pwd, port=50021)
-
-        today = datetime.now().date()
-        todays_count = 0
-        last_capture_at = None
-
-        recordings = []
-        snapshots = {}
-        for possible_dir in ftp.list("/IPCamera"):
-            if mac in possible_dir:
-
-                # Save out the snapshots.
-                for date1 in ftp.list(f"/IPCamera/{possible_dir}/snap"):
-                    for date2 in ftp.list(f"/IPCamera/{possible_dir}/snap/{date1}"):
-                        for snapshot in ftp.list(f"/IPCamera/{possible_dir}/snap/{date1}/{date2}", extra=True):
-                            if not snapshot['name'].endswith("jpg"):
-                                continue
-
-                            name = f"/IPCamera/{possible_dir}/snap/{date1}/{date2}/{snapshot['name']}"
-                            date = self.get_datetime(name)
-
-                            snapshots[date] = name
-
-                # Build recordings array.
-                for date1 in ftp.list(f"/IPCamera/{possible_dir}/record"):
-                    for date2 in ftp.list(f"/IPCamera/{possible_dir}/record/{date1}"):
-                        for recording in ftp.list(f"/IPCamera/{possible_dir}/record/{date1}/{date2}", extra=True):
-                            if not recording['name'].endswith("avi"):
-                                continue
-
-                            name = f"/IPCamera/{possible_dir}/record/{date1}/{date2}/{recording['name']}"
-                            date = self.get_datetime(name)
-
-                            # update counts
-                            LOGGER.debug(f"t1={date.date()},t2={today}")
-                            if date.date() == today:
-                                todays_count += 1
-                            if last_capture_at is None or last_capture_at < date:
-                                last_capture_at = date
-
-                            # find a thumbnail
-                            snapshot = [k for k in sorted(snapshots.keys()) if k > date]
-                            if snapshot:
-                                snapshot = snapshots[snapshot[0]]
-
-                            recordings.append(Recording(date, name, snapshot, recording['size']))
-
-        ftp.close()
-
-        self._recordings = sorted(recordings, key=lambda x: x.created_at, reverse=True)
-        self._todays_count = todays_count
-        if last_capture_at is not None:
-            self._last_capture_at = last_capture_at.strftime("%Y-%m-%dT%H:%M:%S")
-        return 0
-
-    def fetch_recordings(self):
-        LOGGER.debug("fetch recordings")
-        ftp = None
-        cut_off = datetime.now() - timedelta(seconds=CUT_OFF_SECONDS)
-
-        for recording in self._recordings:
-            if os.path.exists(recording.content_url):
-                continue
-
-            if not ftp:
-                self._camera.execute_command('startFtpServer')
-                ftp = ftpretty(self._camera.host, self._camera.usr, self._camera.pwd, port=50021)
-
-            LOGGER.debug(f"checking {recording.content_url}/{recording.remote_size}")
-            ls = ftp.list(recording.remote_content_url, extra=True)
-            if not ls:
-                LOGGER.debug(" file disappeared?")
-                continue
-            ls = ls[0]
-            if ls['datetime'] > cut_off:
-                LOGGER.debug(" too new")
-                continue
-            if ls['size'] == 0:
-                LOGGER.debug(" nothing in it")
-                continue
-            if ls['size'] != recording.remote_size:
-                LOGGER.debug(" size changed!")
-                recording.update_remote_size(ls['size'])
-                continue
-
-            LOGGER.debug(f"copying {recording.thumbnail_url}")
-            ftp.get(recording.remote_thumbnail_url, recording.thumbnail_url)
-
-            LOGGER.debug(f"creating {recording.content_url}")
-            ftp.get(recording.remote_content_url, TMP_AVI)
-            rc = os.system(f"ffmpeg -i {TMP_AVI} {recording.content_url}")
-            os.unlink(TMP_AVI)
-            if rc != 0:
-                LOGGER.warning(f"failed: ffmpeg -i {TMP_AVI} {recording.content_url}")
-                os.unlink(recording.content_url)
-            else:
-                LOGGER.debug(f"finished {recording.content_url}")
-            break
-
-        if ftp is not None:
-            ftp.close()
-
-    def update_data(self):
-        """Fetch data from camera endpoint
-        """
+    def update_data(self) -> dict[str, Any]:
+        """Fetch camera status and sync recordings (runs in executor thread)."""
         now = time.monotonic()
+        was_recording = self._dev_state.get("is_recording", False)
 
-        # save pre-update state
-        recording = self._dev_state.get("recording", "0") == "1"
+        # 1. Query live device telemetry
+        try:
+            self._dev_state = self._camera.get_state()
+        except Exception as err:
+            LOGGER.warning("Failed fetching camera state from %s: %s", self._camera.host, err)
 
-        # update
-        LOGGER.debug("update state")
-        self.update_dev_state()
-        self.update_state()
+        self._update_state()
 
-        # check post-update state
-        if recording and self._dev_state.get("recording", "0") != "1":
-            LOGGER.debug("recording stopped, forcing update")
-            self._last_recording = 0
+        # If recording just finished, force immediate media refresh
+        if was_recording and not self._dev_state.get("is_recording", False):
+            LOGGER.debug("Recording stopped, forcing media refresh")
+            self._last_recordings_check = 0.0
 
-        # check recordings
-        if (self._last_recording + RECORDINGS_TIMEOUT) < now:
-            LOGGER.debug("update recordings")
-            self.update_recordings()
-            self._last_recording = now
+        # 2. Refresh media catalog periodically
+        if (self._last_recordings_check + RECORDINGS_TIMEOUT) < now:
+            try:
+                LOGGER.debug("Refreshing media library from camera")
+                self._media.refresh()
+            except Exception as err:
+                LOGGER.warning("Failed scanning media on %s: %s", self._camera.host, err)
+            self._last_recordings_check = now
 
-        # grab one recording per go after initial setup
-        if self._last_update != 0:
-            self.fetch_recordings()
+        # 3. Fetch one pending clip per cycle after initial startup
+        if self._last_update != 0.0:
+            pending = [r for r in self._media.recordings if not r.is_downloaded]
+            if pending:
+                target = pending[0]
+                try:
+                    LOGGER.debug("Downloading recording: %s", target.clip_id)
+                    self._media.download_recording(target)
+                except Exception as err:
+                    LOGGER.warning("Failed downloading recording %s: %s", target.clip_id, err)
 
         self._last_update = now
 
-    async def _async_update_data(self):
-        await self.hass.async_add_executor_job(
-            self.update_data
-        )
+        last_dt = self._media.last_capture_at
+        last_str = last_dt.strftime("%Y-%m-%dT%H:%M:%S") if last_dt else None
+
         return {
-            "motion_status": self._dev_state["motionDetectAlarm"] != "0",
-            "motion": self._dev_state["motionDetectAlarm"] == "2",
-            "sound_status": self._dev_state["soundAlarm"] == "0",
-            "sound": self._dev_state["soundAlarm"] == "2",
-            "io_status": self._dev_state["IOAlarm"] == "0",
-            "io": self._dev_state["IOAlarm"] == "2",
-            "recording": self._dev_state["record"] == "1",
+            "motion_status": self._dev_state.get("motion_enabled", False),
+            "motion": self._dev_state.get("motion_detected", False),
+            "sound_status": self._dev_state.get("sound_enabled", False),
+            "sound": self._dev_state.get("sound_detected", False),
+            "io_status": self._dev_state.get("io_enabled", False),
+            "io": self._dev_state.get("io_detected", False),
+            "recording": self._dev_state.get("is_recording", False),
 
-            "recordings": self._recordings,
-            "last": self._last_capture_at,
-            "captured_today": self._todays_count,
-            "captured_total": len(self._recordings),
+            "recordings": self._media.recordings,
+            "last": last_str,
+            "captured_today": self._media.captured_today,
+            "captured_total": self._media.captured_total,
 
-            "state": self._state
+            "state": self._state,
         }
+
+    async def _async_update_data(self) -> dict[str, Any]:
+        """Execute update_data in HA executor."""
+        return await self.hass.async_add_executor_job(self.update_data)
