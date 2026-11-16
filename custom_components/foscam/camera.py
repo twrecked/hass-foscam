@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import suppress
 from datetime import datetime
 from typing import Any
 
@@ -15,7 +14,6 @@ from homeassistant.components.camera import (
     Camera,
     CameraView,
 )
-from homeassistant.components.camera.const import CAMERA_IMAGE_TIMEOUT
 from homeassistant.config_entries import SOURCE_IMPORT
 from homeassistant.const import (
     CONF_HOST,
@@ -182,15 +180,21 @@ class HassFoscamCamera(CoordinatorEntity, Camera):
         """Return device state string."""
         return self.coordinator.data.get("state", "idle")
 
-    def camera_image(self, width=None, height=None):
-        """Return a still image response from the camera."""
+    async def async_camera_image(
+        self, width: int | None = None, height: int | None = None
+    ) -> bytes | None:
+        """Return a still image response from the camera asynchronously."""
         try:
-            data = self._foscam_session.get_snapshot()
+            data = await self._foscam_session.get_snapshot()
             self._image_source = "capture/" + datetime.now().strftime("%m-%d %H:%M:%S")
             return data
         except Exception as err:
             LOGGER.debug("Snapshot failed on %s: %s", self._name, err)
             return None
+
+    def camera_image(self, width=None, height=None):
+        """Synchronous camera image fallback."""
+        return None
 
     @property
     def supported_features(self):
@@ -213,7 +217,7 @@ class HassFoscamCamera(CoordinatorEntity, Camera):
     async def async_enable_motion_detection(self):
         """Enable motion detection in camera."""
         try:
-            await self.hass.async_add_executor_job(self._foscam_session.enable_motion_detection)
+            await self._foscam_session.enable_motion_detection()
             await self.coordinator.async_request_refresh()
         except Exception as err:
             LOGGER.warning("Failed enabling motion detection on %s: %s", self._name, err)
@@ -221,7 +225,7 @@ class HassFoscamCamera(CoordinatorEntity, Camera):
     async def async_disable_motion_detection(self):
         """Disable motion detection."""
         try:
-            await self.hass.async_add_executor_job(self._foscam_session.disable_motion_detection)
+            await self._foscam_session.disable_motion_detection()
             await self.coordinator.async_request_refresh()
         except Exception as err:
             LOGGER.warning("Failed disabling motion detection on %s: %s", self._name, err)
@@ -230,9 +234,7 @@ class HassFoscamCamera(CoordinatorEntity, Camera):
         """Perform a PTZ action on the camera."""
         LOGGER.debug("PTZ action '%s' on %s (travel_time=%.2f)", movement, self._name, travel_time)
         try:
-            await self.hass.async_add_executor_job(
-                self._foscam_session.ptz, movement, travel_time
-            )
+            await self._foscam_session.ptz(movement, travel_time)
         except Exception as err:
             LOGGER.error("Error moving %s '%s': %s", movement, self._name, err)
 
@@ -240,9 +242,7 @@ class HassFoscamCamera(CoordinatorEntity, Camera):
         """Perform a PTZ preset action on the camera."""
         LOGGER.debug("PTZ preset '%s' on %s", preset_name, self._name)
         try:
-            await self.hass.async_add_executor_job(
-                self._foscam_session.ptz_preset, preset_name
-            )
+            await self._foscam_session.ptz_preset(preset_name)
         except Exception as err:
             LOGGER.error("Error moving to preset %s on '%s': %s", preset_name, self._name, err)
 
@@ -293,7 +293,9 @@ class HassFoscamCameraImageView(CameraView):
                     pass
 
             if rec and rec.is_thumbnail_downloaded:
-                return web.FileResponse(path=rec.local_thumbnail_path, headers={"Content-Type": "image/jpeg"})
+                return web.FileResponse(
+                    path=rec.local_thumbnail_path, headers={"Content-Type": "image/jpeg"}
+                )
 
             # Fallback to camera snapshot
             image = await camera.async_camera_image()
@@ -336,9 +338,7 @@ class HassFoscamCameraRecordingView(CameraView):
                 # Ensure local video file is downloaded
                 if not rec.is_downloaded and not rec.is_raw_downloaded:
                     try:
-                        await camera.hass.async_add_executor_job(
-                            camera._foscam_session.media.download_recording, rec
-                        )
+                        await camera._foscam_session.media.download_recording(rec)
                     except Exception as err:
                         LOGGER.warning("On-demand download failed for %s: %s", rec.clip_id, err)
                         raise web.HTTPNotFound()
@@ -366,7 +366,9 @@ async def websocket_library(hass, connection, msg):
         for v in camera.last_n_videos(msg["at_most"]):
             videos.append(
                 {
-                    "created_at": v.created_at.isoformat() if hasattr(v.created_at, "isoformat") else str(v.created_at),
+                    "created_at": v.created_at.isoformat()
+                    if hasattr(v.created_at, "isoformat")
+                    else str(v.created_at),
                     "created_at_pretty": v.created_at_pretty(),
                     "duration": v.duration,
                     "url": RECORDING_URL.format(msg["entity_id"], v.clip_id, token),

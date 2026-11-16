@@ -63,14 +63,14 @@ class Updater(DataUpdateCoordinator):
 
         self._state = state
 
-    def update_data(self) -> dict[str, Any]:
-        """Fetch camera status and sync recordings (runs in executor thread)."""
+    async def _async_update_data(self) -> dict[str, Any]:
+        """Fetch camera status and sync recordings asynchronously."""
         now = time.monotonic()
         was_recording = self._dev_state.get("is_recording", False)
 
         # 1. Query live device telemetry
         try:
-            self._dev_state = self._camera.get_state()
+            self._dev_state = await self._camera.get_state()
         except Exception as err:
             LOGGER.warning("Failed fetching camera state from %s: %s", self._camera.host, err)
 
@@ -85,7 +85,7 @@ class Updater(DataUpdateCoordinator):
         if (self._last_recordings_check + RECORDINGS_TIMEOUT) < now:
             try:
                 LOGGER.debug("Refreshing media library from camera")
-                self._media.refresh()
+                await self._media.refresh()
             except Exception as err:
                 LOGGER.warning("Failed scanning media on %s: %s", self._camera.host, err)
             self._last_recordings_check = now
@@ -97,7 +97,7 @@ class Updater(DataUpdateCoordinator):
                 target = pending[0]
                 try:
                     LOGGER.debug("Downloading recording: %s", target.clip_id)
-                    self._media.download_recording(target)
+                    await self._media.download_recording(target)
                 except Exception as err:
                     LOGGER.warning("Failed downloading recording %s: %s", target.clip_id, err)
 
@@ -114,15 +114,9 @@ class Updater(DataUpdateCoordinator):
             "io_status": self._dev_state.get("io_enabled", False),
             "io": self._dev_state.get("io_detected", False),
             "recording": self._dev_state.get("is_recording", False),
-
             "recordings": self._media.recordings,
             "last": last_str,
             "captured_today": self._media.captured_today,
             "captured_total": self._media.captured_total,
-
             "state": self._state,
         }
-
-    async def _async_update_data(self) -> dict[str, Any]:
-        """Execute update_data in HA executor."""
-        return await self.hass.async_add_executor_job(self.update_data)

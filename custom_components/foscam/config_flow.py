@@ -1,11 +1,14 @@
 """Config flow for foscam integration."""
-from libpyfoscam import FoscamCamera
-from libpyfoscam.foscam import (
-    ERROR_FOSCAM_AUTH,
-    ERROR_FOSCAM_UNAVAILABLE,
-    FOSCAM_SUCCESS,
-)
+from __future__ import annotations
+
 import voluptuous as vol
+
+from foscam import (
+    FoscamAuthError,
+    FoscamCamera,
+    FoscamConnectionError,
+    FoscamError,
+)
 
 from homeassistant import config_entries, exceptions
 from homeassistant.const import (
@@ -56,37 +59,32 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 raise AbortFlow("already_configured")
 
         camera = FoscamCamera(
-            data[CONF_HOST],
-            data[CONF_PORT],
-            data[CONF_USERNAME],
-            data[CONF_PASSWORD],
+            host=data[CONF_HOST],
+            port=data[CONF_PORT],
+            username=data[CONF_USERNAME],
+            password=data[CONF_PASSWORD],
             verbose=False,
         )
 
-        # Validate data by sending a request to the camera
-        ret, _ = await self.hass.async_add_executor_job(camera.get_product_all_info)
-
-        if ret == ERROR_FOSCAM_UNAVAILABLE:
-            raise CannotConnect
-
-        if ret == ERROR_FOSCAM_AUTH:
-            raise InvalidAuth
-
-        if ret != FOSCAM_SUCCESS:
+        try:
+            info = await camera.get_info()
+            dev_name = info.get(
+                "devName", f"Foscam {data[CONF_HOST]}:{data[CONF_PORT]}"
+            )
+        except FoscamConnectionError as err:
+            raise CannotConnect from err
+        except FoscamAuthError as err:
+            raise InvalidAuth from err
+        except FoscamError as err:
             LOGGER.error(
                 "Unexpected error code from camera %s:%s: %s",
                 data[CONF_HOST],
                 data[CONF_PORT],
-                ret,
+                err,
             )
-            raise InvalidResponse
-
-        # Try to get camera name (only possible with admin account)
-        ret, response = await self.hass.async_add_executor_job(camera.get_dev_info)
-
-        dev_name = response.get(
-            "devName", f"Foscam {data[CONF_HOST]}:{data[CONF_PORT]}"
-        )
+            raise InvalidResponse from err
+        finally:
+            await camera.close()
 
         name = data.pop(CONF_NAME, dev_name)
 

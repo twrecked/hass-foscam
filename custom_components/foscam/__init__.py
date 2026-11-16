@@ -1,4 +1,5 @@
 """The foscam component."""
+from __future__ import annotations
 
 import asyncio
 from pathlib import Path
@@ -72,7 +73,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry):
         )
 
     if unload_ok:
-        hass.data[DOMAIN].pop(entry.entry_id)
+        data = hass.data[DOMAIN].pop(entry.entry_id, {})
+        camera = data.get("camera")
+        if camera:
+            await camera.close()
 
         if not hass.data[DOMAIN]:
             hass.services.async_remove(domain=DOMAIN, service=SERVICE_PTZ)
@@ -81,7 +85,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry):
     return unload_ok
 
 
-async def async_migrate_entry(hass, config_entry: ConfigEntry):
+async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry):
     """Migrate old entry."""
     LOGGER.debug("Migrating from version %s", config_entry.version)
 
@@ -105,10 +109,12 @@ async def async_migrate_entry(hass, config_entry: ConfigEntry):
         )
 
         try:
-            info = await hass.async_add_executor_job(camera.get_info)
+            info = await camera.get_info()
             rtsp_port = info.get("rtspPort") or DEFAULT_RTSP_PORT
         except Exception:
             rtsp_port = DEFAULT_RTSP_PORT
+        finally:
+            await camera.close()
 
         config_entry.data = {**config_entry.data, CONF_RTSP_PORT: rtsp_port}
 
