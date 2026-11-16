@@ -1,12 +1,14 @@
 """An implementation of a camera state and media updater using pyfoscam."""
 from __future__ import annotations
 
-import logging
 import time
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+
+from foscam.exceptions import FoscamError
 
 from .const import LOGGER
 
@@ -17,10 +19,12 @@ RECORDINGS_TIMEOUT = 60
 RECENT_TIMEOUT = 30
 
 
-class Updater(DataUpdateCoordinator):
+class Updater(DataUpdateCoordinator[dict[str, Any]]):
     """Camera state and recordings updater."""
 
-    def __init__(self, hass, camera: FoscamCamera, polling_interval: int = 5) -> None:
+    def __init__(
+        self, hass: HomeAssistant, camera: FoscamCamera, polling_interval: int = 5
+    ) -> None:
         """Initialize the coordinator."""
         super().__init__(
             hass=hass,
@@ -71,7 +75,7 @@ class Updater(DataUpdateCoordinator):
         # 1. Query live device telemetry
         try:
             self._dev_state = await self._camera.get_state()
-        except Exception as err:
+        except (FoscamError, TimeoutError, OSError) as err:
             LOGGER.warning("Failed fetching camera state from %s: %s", self._camera.host, err)
 
         self._update_state()
@@ -86,7 +90,7 @@ class Updater(DataUpdateCoordinator):
             try:
                 LOGGER.debug("Refreshing media library from camera")
                 await self._media.refresh()
-            except Exception as err:
+            except (FoscamError, TimeoutError, OSError) as err:
                 LOGGER.warning("Failed scanning media on %s: %s", self._camera.host, err)
             self._last_recordings_check = now
 
@@ -98,7 +102,7 @@ class Updater(DataUpdateCoordinator):
                 try:
                     LOGGER.debug("Downloading recording: %s", target.clip_id)
                     await self._media.download_recording(target)
-                except Exception as err:
+                except (FoscamError, TimeoutError, OSError) as err:
                     LOGGER.warning("Failed downloading recording %s: %s", target.clip_id, err)
 
         self._last_update = now

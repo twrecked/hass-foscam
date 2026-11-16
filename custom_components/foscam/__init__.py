@@ -1,15 +1,16 @@
 """The foscam component."""
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
-
-from foscam import FoscamCamera
+from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_PORT, CONF_USERNAME
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_registry import async_migrate_entries
+
+from foscam import FoscamCamera
+from foscam.exceptions import FoscamError
 
 from .config_flow import DEFAULT_RTSP_PORT
 from .const import CONF_RTSP_PORT, DOMAIN, LOGGER, SERVICE_PTZ, SERVICE_PTZ_PRESET
@@ -18,7 +19,7 @@ from .updater import Updater
 PLATFORMS = ["camera", "binary_sensor", "sensor"]
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Create camera and coordinator.
 
     Everything comes through a single camera entity.
@@ -48,33 +49,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     }
 
     await coordinator.async_config_entry_first_refresh()
-
-    """Set up foscam entries from a config entry."""
-    if hasattr(hass.config_entries, "async_forward_entry_setups"):
-        await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-    else:
-        hass.config_entries.async_setup_platforms(entry, PLATFORMS)
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     return True
 
 
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry):
+async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
-    if hasattr(hass.config_entries, "async_unload_platforms"):
-        unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-    else:
-        unload_ok = all(
-            await asyncio.gather(
-                *[
-                    hass.config_entries.async_forward_entry_unload(entry, platform)
-                    for platform in PLATFORMS
-                ]
-            )
-        )
+    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 
     if unload_ok:
         data = hass.data[DOMAIN].pop(entry.entry_id, {})
-        camera = data.get("camera")
+        camera: FoscamCamera | None = data.get("camera")
         if camera:
             await camera.close()
 
@@ -85,19 +71,17 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry):
     return unload_ok
 
 
-async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry):
+async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
     """Migrate old entry."""
     LOGGER.debug("Migrating from version %s", config_entry.version)
 
     if config_entry.version == 1:
         # Change unique id
         @callback
-        def update_unique_id(entry):
+        def update_unique_id(entry: Any) -> dict[str, str]:
             return {"new_unique_id": config_entry.entry_id}
 
         await async_migrate_entries(hass, config_entry.entry_id, update_unique_id)
-
-        config_entry.unique_id = None
 
         # Get RTSP port from the camera or use fallback
         camera = FoscamCamera(
@@ -111,16 +95,17 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry):
         try:
             info = await camera.get_info()
             rtsp_port = info.get("rtspPort") or DEFAULT_RTSP_PORT
-        except Exception:
+        except (FoscamError, TimeoutError, OSError):
             rtsp_port = DEFAULT_RTSP_PORT
         finally:
             await camera.close()
 
-        config_entry.data = {**config_entry.data, CONF_RTSP_PORT: rtsp_port}
-
-        # Change entry version
-        config_entry.version = 2
+        hass.config_entries.async_update_entry(
+            config_entry,
+            unique_id=None,
+            data={**config_entry.data, CONF_RTSP_PORT: rtsp_port},
+            version=2,
+        )
 
     LOGGER.info("Migration to version %s successful", config_entry.version)
-
     return True

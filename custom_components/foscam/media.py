@@ -1,4 +1,8 @@
 """Media objects for Foscam integration."""
-from foscam.media import FoscamRecording as Recording, FoscamRecording
+from __future__ import annotations
 
-__all__ = ["Recording", "FoscamRecording"]
+from foscam.media import FoscamRecording
+
+Recording = FoscamRecording
+
+__all__ = ["FoscamRecording", "Recording"]

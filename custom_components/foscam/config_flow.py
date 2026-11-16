@@ -1,16 +1,11 @@
 """Config flow for foscam integration."""
 from __future__ import annotations
 
+from typing import Any
+
 import voluptuous as vol
-
-from foscam import (
-    FoscamAuthError,
-    FoscamCamera,
-    FoscamConnectionError,
-    FoscamError,
-)
-
 from homeassistant import config_entries, exceptions
+from homeassistant.config_entries import ConfigFlowResult
 from homeassistant.const import (
     CONF_HOST,
     CONF_NAME,
@@ -19,6 +14,13 @@ from homeassistant.const import (
     CONF_USERNAME,
 )
 from homeassistant.data_entry_flow import AbortFlow
+
+from foscam import (
+    FoscamAuthError,
+    FoscamCamera,
+    FoscamConnectionError,
+    FoscamError,
+)
 
 from .const import CONF_RTSP_PORT, CONF_STREAM, DOMAIN, LOGGER
 
@@ -45,7 +47,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     VERSION = 2
 
-    async def _validate_and_create(self, data):
+    async def _validate_and_create(self, data: dict[str, Any]) -> ConfigFlowResult:
         """Validate the user input allows us to connect.
 
         Data has the keys from DATA_SCHEMA with values provided by the user.
@@ -90,9 +92,9 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         return self.async_create_entry(title=name, data=data)
 
-    async def async_step_user(self, user_input=None):
+    async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Handle the initial step."""
-        errors = {}
+        errors: dict[str, str] = {}
 
         if user_input is not None:
             try:
@@ -110,7 +112,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             except AbortFlow:
                 raise
 
-            except Exception:  # pylint: disable=broad-except
+            except Exception:  # noqa: BLE001
                 LOGGER.exception("Unexpected exception")
                 errors["base"] = "unknown"
 
@@ -118,7 +120,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="user", data_schema=DATA_SCHEMA, errors=errors
         )
 
-    async def async_step_import(self, import_config):
+    async def async_step_import(self, import_config: dict[str, Any]) -> ConfigFlowResult:
         """Handle config import from yaml."""
         try:
             return await self._validate_and_create(import_config)
@@ -140,7 +142,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         except AbortFlow:
             raise
 
-        except Exception:  # pylint: disable=broad-except
+        except Exception:  # noqa: BLE001
             LOGGER.exception(
                 "Error importing foscam platform config: unexpected exception"
             )
