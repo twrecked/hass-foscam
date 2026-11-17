@@ -132,6 +132,6 @@ dmypy.json
 *~
 .*.sw?
 
-foscam/
+/foscam/
 .idea/
 AGENTS.md
