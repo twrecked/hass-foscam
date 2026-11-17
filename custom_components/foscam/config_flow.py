@@ -36,6 +36,7 @@ DATA_SCHEMA = vol.Schema(
         vol.Required(CONF_PORT, default=DEFAULT_PORT): int,
         vol.Required(CONF_USERNAME): str,
         vol.Required(CONF_PASSWORD): str,
+        vol.Optional(CONF_NAME): str,
         vol.Required(CONF_STREAM, default=STREAMS[0]): vol.In(STREAMS),
         vol.Required(CONF_RTSP_PORT, default=DEFAULT_RTSP_PORT): int,
     }
@@ -88,9 +89,10 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         finally:
             await camera.close()
 
-        name = data.pop(CONF_NAME, dev_name)
+        custom_name = data.pop(CONF_NAME, None)
+        title = custom_name.strip() if custom_name and custom_name.strip() else dev_name
 
-        return self.async_create_entry(title=name, data=data)
+        return self.async_create_entry(title=title, data=data)
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Handle the initial step."""

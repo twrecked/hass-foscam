@@ -24,6 +24,7 @@ from homeassistant.const import (
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import entity_platform
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -179,9 +180,26 @@ class HassFoscamCamera(CoordinatorEntity[Updater], Camera):
         self._stream = config_entry.data.get(CONF_STREAM, "Main")
         self._unique_id = config_entry.entry_id
         self._rtsp_port = config_entry.data.get(CONF_RTSP_PORT)
+        self._attr_has_entity_name = True
+        self._attr_name = None
 
         self._image_source: str | None = None
         LOGGER.info("Starting Foscam camera %s", self._name)
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return device information about this camera."""
+        info = self._foscam_session._dev_info or {}
+        mac = self._foscam_session.mac_address or self._unique_id
+        return DeviceInfo(
+            identifiers={(DOMAIN, mac)},
+            name=self._name,
+            manufacturer="Foscam",
+            model=info.get("modelName", "IP Camera"),
+            sw_version=info.get("firmwareVer"),
+            hw_version=info.get("hardwareVer"),
+            configuration_url=f"http://{self._foscam_session.host}:{self._foscam_session.port}",
+        )
 
     @property
     def unique_id(self) -> str:
