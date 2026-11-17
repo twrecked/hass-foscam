@@ -316,6 +316,7 @@ class HassFoscamCamera(CoordinatorEntity[Updater], Camera):
             "last_thumbnail": RECORDING_THUMBNAIL_URL.format(self.entity_id, first_id, token),
             "image_source": self.image_source,
             "state": self.coordinator.data.get("state", "idle"),
+            "preset_list": self.coordinator.data.get("preset_list", []),
         }
 
 

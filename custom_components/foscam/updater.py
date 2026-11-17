@@ -49,6 +49,7 @@ class Updater(DataUpdateCoordinator[dict[str, Any]]):
         self._last_prune = 0.0
         self._last_activity = 0.0
         self._dev_state: dict[str, Any] = {}
+        self._presets: list[str] = []
 
     def _update_state(self) -> None:
         """Calculate state machine transitions."""
@@ -82,6 +83,8 @@ class Updater(DataUpdateCoordinator[dict[str, Any]]):
         # 1. Query live device telemetry
         try:
             self._dev_state = await self._camera.get_state()
+            if not self._presets or self._last_update == 0.0:
+                self._presets = await self._camera.get_ptz_presets()
         except (FoscamError, TimeoutError, OSError) as err:
             LOGGER.warning("Failed fetching camera state from %s: %s", self._camera.host, err)
 
@@ -145,4 +148,5 @@ class Updater(DataUpdateCoordinator[dict[str, Any]]):
             "captured_today": self._media.captured_today,
             "captured_total": self._media.captured_total,
             "state": self._state,
+            "preset_list": self._presets,
         }
