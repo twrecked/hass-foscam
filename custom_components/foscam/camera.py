@@ -287,6 +287,15 @@ class HassFoscamCamera(CoordinatorEntity[Updater], Camera):
         except (FoscamError, OSError) as err:
             LOGGER.warning("Failed pruning recordings on %s: %s", self._name, err)
 
+    @property
+    def last_capture_date_format(self) -> str:
+        """Date format for capture timestamps."""
+        return "%m-%d %H:%M:%S"
+
+    async def async_stop_activity(self) -> bool:
+        """Stop any active activity on camera."""
+        return True
+
     def last_n_videos(self, at_most: int) -> list[Any]:
         """Return video response from the camera."""
         return self.coordinator.data.get("recordings", [])[:at_most]
