@@ -1,0 +1,10 @@
+Unreleased
+
+0.1.0-alpha.1
+  - Initial alpha release of modernized foscam component
+  - Native async coordinator and entity actions using pyfoscam
+  - Video recording library access with HTTP 206 range-request seeking
+  - Services: foscam.ptz, foscam.ptz_preset, foscam.prune_recordings
+  - Binary sensors for motion, sound, and I/O alarms
+  - Daily automated local recording storage retention pruning
+  - WebSocket command: foscam_library
