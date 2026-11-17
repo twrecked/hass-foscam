@@ -207,11 +207,6 @@ class HassFoscamCamera(CoordinatorEntity[Updater], Camera):
         return self._unique_id
 
     @property
-    def name(self) -> str:
-        """Return the name of this camera."""
-        return self._name
-
-    @property
     def is_recording(self) -> bool:
         """Return true if the camera is recording."""
         return bool(self.coordinator.data.get("recording", False))
