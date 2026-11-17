@@ -10,3 +10,4 @@ CONF_STREAM = "stream"
 
 SERVICE_PTZ = "ptz"
 SERVICE_PTZ_PRESET = "ptz_preset"
+SERVICE_PRUNE_RECORDINGS = "prune_recordings"

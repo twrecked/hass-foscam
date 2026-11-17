@@ -17,13 +17,18 @@ if TYPE_CHECKING:
 
 RECORDINGS_TIMEOUT = 60
 RECENT_TIMEOUT = 30
+PRUNE_INTERVAL = 86400  # Prune expired local downloads once per day
 
 
 class Updater(DataUpdateCoordinator[dict[str, Any]]):
     """Camera state and recordings updater."""
 
     def __init__(
-        self, hass: HomeAssistant, camera: FoscamCamera, polling_interval: int = 5
+        self,
+        hass: HomeAssistant,
+        camera: FoscamCamera,
+        polling_interval: int = 5,
+        retention_days: int = 30,
     ) -> None:
         """Initialize the coordinator."""
         super().__init__(
@@ -35,11 +40,13 @@ class Updater(DataUpdateCoordinator[dict[str, Any]]):
 
         self._camera = camera
         self._media = camera.media
+        self.retention_days = retention_days
 
         # Runtime state
         self._state = "unknown"
         self._last_update = 0.0
         self._last_recordings_check = 0.0
+        self._last_prune = 0.0
         self._last_activity = 0.0
         self._dev_state: dict[str, Any] = {}
 
@@ -85,7 +92,7 @@ class Updater(DataUpdateCoordinator[dict[str, Any]]):
             LOGGER.debug("Recording stopped, forcing media refresh")
             self._last_recordings_check = 0.0
 
-        # 2. Refresh media catalog periodically
+        # 2. Refresh media catalog periodically (using persistent caching)
         if (self._last_recordings_check + RECORDINGS_TIMEOUT) < now:
             try:
                 LOGGER.debug("Refreshing media library from camera")
@@ -104,6 +111,21 @@ class Updater(DataUpdateCoordinator[dict[str, Any]]):
                     await self._media.download_recording(target)
                 except (FoscamError, TimeoutError, OSError) as err:
                     LOGGER.warning("Failed downloading recording %s: %s", target.clip_id, err)
+
+        # 4. Prune expired local downloads daily
+        if self._last_update != 0.0 and (self._last_prune + PRUNE_INTERVAL) < now:
+            try:
+                deleted, freed = await self._media.prune_local(days=self.retention_days)
+                if deleted > 0:
+                    LOGGER.info(
+                        "Pruned %d expired local recordings (%d bytes freed) from %s",
+                        deleted,
+                        freed,
+                        self._media.storage_dir,
+                    )
+            except (FoscamError, OSError) as err:
+                LOGGER.debug("Local recordings prune failed on %s: %s", self._camera.host, err)
+            self._last_prune = now
 
         self._last_update = now
 

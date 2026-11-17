@@ -35,6 +35,7 @@ from .const import (
     CONF_STREAM,
     DOMAIN,
     LOGGER,
+    SERVICE_PRUNE_RECORDINGS,
     SERVICE_PTZ,
     SERVICE_PTZ_PRESET,
 )
@@ -151,6 +152,14 @@ async def async_setup_entry(
             "async_perform_ptz_preset",
         )
 
+        platform.async_register_entity_service(
+            SERVICE_PRUNE_RECORDINGS,
+            {
+                vol.Optional("days", default=30): cv.positive_int,
+            },
+            "async_prune_recordings",
+        )
+
     data = hass.data[DOMAIN][config_entry.entry_id]
     async_add_entities([HassFoscamCamera(data, config_entry)])
 
@@ -256,6 +265,14 @@ class HassFoscamCamera(CoordinatorEntity[Updater], Camera):
             await self._foscam_session.ptz_preset(preset_name)
         except (FoscamError, TimeoutError, OSError) as err:
             LOGGER.error("Error moving to preset %s on '%s': %s", preset_name, self._name, err)
+
+    async def async_prune_recordings(self, days: int = 30) -> None:
+        """Prune local recordings older than retention days."""
+        try:
+            deleted, freed = await self._foscam_session.media.prune_local(days=days)
+            LOGGER.info("Pruned %d recordings (%d bytes freed) on %s", deleted, freed, self._name)
+        except (FoscamError, OSError) as err:
+            LOGGER.warning("Failed pruning recordings on %s: %s", self._name, err)
 
     def last_n_videos(self, at_most: int) -> list[Any]:
         """Return video response from the camera."""

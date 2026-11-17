@@ -20,3 +20,13 @@ ptz_preset:
     preset_name:
       description: "The name of the preset to move to.  Presets can be created from within the official Foscam apps."
       example: "TopMost"
+
+prune_recordings:
+  description: Delete expired local downloaded recordings and thumbnails.
+  fields:
+    entity_id:
+      description: Name(s) of camera entities to prune.
+      example: "camera.living_room_camera"
+    days:
+      description: "(Optional) Retention period in days; files older than this will be deleted. Default: 30"
+      example: 30

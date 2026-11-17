@@ -13,7 +13,14 @@ from foscam import FoscamCamera
 from foscam.exceptions import FoscamError
 
 from .config_flow import DEFAULT_RTSP_PORT
-from .const import CONF_RTSP_PORT, DOMAIN, LOGGER, SERVICE_PTZ, SERVICE_PTZ_PRESET
+from .const import (
+    CONF_RTSP_PORT,
+    DOMAIN,
+    LOGGER,
+    SERVICE_PRUNE_RECORDINGS,
+    SERVICE_PTZ,
+    SERVICE_PTZ_PRESET,
+)
 from .updater import Updater
 
 PLATFORMS = ["camera", "binary_sensor", "sensor"]
@@ -67,6 +74,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if not hass.data[DOMAIN]:
             hass.services.async_remove(domain=DOMAIN, service=SERVICE_PTZ)
             hass.services.async_remove(domain=DOMAIN, service=SERVICE_PTZ_PRESET)
+            hass.services.async_remove(domain=DOMAIN, service=SERVICE_PRUNE_RECORDINGS)
 
     return unload_ok
 
