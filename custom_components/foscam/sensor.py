@@ -14,7 +14,7 @@ from .const import DOMAIN, LOGGER
 from .updater import Updater
 
 SENSOR_TYPES = [
-    ("last", "Last Capture", "mdi:fast-run"),
+    ("last", "Last Capture", "mdi:run-fast"),
     ("captured_today", "Captured Today", "mdi:file-video"),
     ("captured_total", "Total Captures", "mdi:file-video"),
 ]
@@ -74,6 +74,38 @@ class HassFoscamSensor(CoordinatorEntity[Updater], SensorEntity):
             hw_version=info.get("hardwareVer"),
             configuration_url=f"http://{camera.host}:{camera.port}",
         )
+
+    @property
+    def icon(self) -> str | None:
+        """Icon to use in the frontend."""
+        if self._state_key == "last":
+            recordings = self.coordinator.data.get("recordings", [])
+            if recordings:
+                trigger = getattr(recordings[0], "trigger", "motion")
+                if trigger == "motion":
+                    return "mdi:run-fast"
+                if trigger == "alarm":
+                    return "mdi:bell-ring"
+                if trigger == "schedule":
+                    return "mdi:calendar-clock"
+            return "mdi:run-fast"
+        return self._attr_icon
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        """Return attributes for sensor."""
+        if self._state_key == "last":
+            recordings = self.coordinator.data.get("recordings", [])
+            if recordings:
+                latest = recordings[0]
+                return {
+                    "clip_id": latest.clip_id,
+                    "trigger": latest.trigger,
+                    "duration": latest.duration,
+                    "video_url": latest.content_url,
+                    "thumbnail_url": latest.thumbnail_url,
+                }
+        return None
 
     @property
     def native_value(self) -> str | int | None:
