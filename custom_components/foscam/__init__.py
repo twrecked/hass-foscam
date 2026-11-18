@@ -23,7 +23,7 @@ from .const import (
 )
 from .updater import Updater
 
-PLATFORMS = ["camera", "binary_sensor", "sensor"]
+PLATFORMS = ["camera", "binary_sensor", "sensor", "switch", "number"]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
