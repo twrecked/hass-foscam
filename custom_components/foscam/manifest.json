@@ -7,6 +7,6 @@
     "pyfoscam @ git+https://github.com/twrecked/pyfoscam.git@v0.1.0-alpha.2"
   ],
   "codeowners": ["@twrecked", "@skgsergio"],
-  "version": "0.1.0-alpha.3",
+  "version": "0.1.0-alpha.4",
   "iot_class": "local_polling"
 }
