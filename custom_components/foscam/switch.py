@@ -5,7 +5,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
-from homeassistant.components.switch import SwitchEntity
+from homeassistant.components.switch import SwitchEntity, SwitchEntityDescription
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
@@ -16,14 +16,11 @@ from .const import DOMAIN, LOGGER
 from .updater import Updater
 
 
-@dataclass(frozen=True)
-class FoscamSwitchDescription:
+@dataclass(frozen=True, kw_only=True)
+class FoscamSwitchDescription(SwitchEntityDescription):
     """Description of a Foscam switch entity."""
 
-    key: str
-    name: str
     capability: str
-    icon: str
     state_key: str
     turn_on_fn: Callable[[Updater], Awaitable[None]]
     turn_off_fn: Callable[[Updater], Awaitable[None]]
@@ -126,6 +123,7 @@ async def async_setup_entry(
 class HassFoscamSwitch(CoordinatorEntity[Updater], SwitchEntity):
     """An implementation of a Foscam switch entity."""
 
+    entity_description: FoscamSwitchDescription
     _attr_has_entity_name = True
 
     def __init__(
@@ -138,10 +136,10 @@ class HassFoscamSwitch(CoordinatorEntity[Updater], SwitchEntity):
         super().__init__(data["coordinator"])
 
         self.entity_description = description
-        self._desc = description
         self._attr_name = description.name
         self._attr_unique_id = f"{description.key}_{config_entry.entry_id}"
         self._attr_icon = description.icon
+        self._attr_translation_key = description.key
         self._entry_id = config_entry.entry_id
         self._entry_title = config_entry.title
         LOGGER.info("Starting %s %s switch", config_entry.title, description.name)
@@ -165,12 +163,12 @@ class HassFoscamSwitch(CoordinatorEntity[Updater], SwitchEntity):
     @property
     def is_on(self) -> bool:
         """Return true if switch is on."""
-        return bool(self.coordinator.data.get(self._desc.state_key, False))
+        return bool(self.coordinator.data.get(self.entity_description.state_key, False))
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn switch on."""
-        await self._desc.turn_on_fn(self.coordinator)
+        await self.entity_description.turn_on_fn(self.coordinator)
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn switch off."""
-        await self._desc.turn_off_fn(self.coordinator)
+        await self.entity_description.turn_off_fn(self.coordinator)
