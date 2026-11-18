@@ -1,6 +1,7 @@
 """The foscam component."""
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -14,7 +15,9 @@ from foscam.exceptions import FoscamError
 
 from .config_flow import DEFAULT_RTSP_PORT
 from .const import (
+    CONF_RETENTION_DAYS,
     CONF_RTSP_PORT,
+    DEFAULT_RETENTION_DAYS,
     DOMAIN,
     LOGGER,
     SERVICE_PRUNE_RECORDINGS,
@@ -26,12 +29,28 @@ from .updater import Updater
 PLATFORMS = ["camera", "binary_sensor", "sensor", "switch", "number"]
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Create camera and coordinator.
+def get_camera_storage_dir(hass: HomeAssistant, entry: ConfigEntry) -> Path:
+    """Resolve storage directory under /media/foscam/<camera-name>."""
+    media_dirs = getattr(hass.config, "media_dirs", {}) or {}
+    local_media = media_dirs.get("local")
+    base_media_dir = Path(local_media) if local_media else Path("/media")
 
-    Everything comes through a single camera entity.
-    """
-    storage_dir = Path(hass.config.config_dir) / "foscam"
+    camera_name = entry.title or entry.data.get(CONF_HOST, "camera")
+    slug = re.sub(r"[^\w\s-]", "", camera_name.lower().strip())
+    slug = re.sub(r"[-\s]+", "_", slug) or "camera"
+
+    storage_dir = base_media_dir / "foscam" / slug
+    storage_dir.mkdir(parents=True, exist_ok=True)
+    return storage_dir
+
+
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Create camera and coordinator."""
+    storage_dir = get_camera_storage_dir(hass, entry)
+    retention_days = entry.options.get(
+        CONF_RETENTION_DAYS,
+        entry.data.get(CONF_RETENTION_DAYS, DEFAULT_RETENTION_DAYS),
+    )
 
     camera = FoscamCamera(
         host=entry.data[CONF_HOST],
@@ -42,11 +61,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         storage_dir=storage_dir,
         verbose=False,
     )
+    camera.media.days_cutoff = retention_days
 
     coordinator = Updater(
         hass,
         camera,
-        5,
+        polling_interval=5,
+        retention_days=retention_days,
     )
 
     hass.data.setdefault(DOMAIN, {})
@@ -55,10 +76,30 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "coordinator": coordinator,
     }
 
+    entry.async_on_unload(entry.add_update_listener(async_update_options))
+
     await coordinator.async_config_entry_first_refresh()
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     return True
+
+
+async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Handle options update."""
+    data = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    if not data:
+        return
+
+    retention_days = entry.options.get(
+        CONF_RETENTION_DAYS,
+        entry.data.get(CONF_RETENTION_DAYS, DEFAULT_RETENTION_DAYS),
+    )
+    coordinator: Updater = data["coordinator"]
+    camera: FoscamCamera = data["camera"]
+
+    coordinator.retention_days = retention_days
+    camera.media.days_cutoff = retention_days
+    LOGGER.info("Updated %s retention days to %d", entry.title, retention_days)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
