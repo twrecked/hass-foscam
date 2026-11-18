@@ -1,5 +1,20 @@
 Unreleased
 
+0.1.0-alpha.3
+  - Added new Switch platform (`switch.py`) providing native async switches:
+    - Sleep mode (`switch.<camera>_sleep`)
+    - Physical status light (`switch.<camera>_status_light`)
+    - Video flip (`switch.<camera>_flip`)
+    - Video mirror (`switch.<camera>_mirror`)
+    - Night vision infrared mode (`switch.<camera>_infrared_mode`)
+    - Volume mute (`switch.<camera>_volume_muted`)
+    - White light / spotlight (`switch.<camera>_white_light`, model-dependent)
+    - Siren alarm (`switch.<camera>_siren_alarm`, model-dependent)
+  - Added new Number platform (`number.py`) providing speaker volume slider (`number.<camera>_device_volume`, 0-100%, step 1).
+  - Implemented startup camera capability probing in `updater.py`: only entities supported by the specific camera model are created and registered in Home Assistant; unsupported hardware controls are cleanly hidden.
+  - Subclassed standard Home Assistant `SwitchEntityDescription` and `NumberEntityDescription` with `translation_key` to ensure proper entity registration without duplicate name prefixes.
+  - Pinned requirement to `pyfoscam v0.1.0-alpha.2`.
+
 0.1.0-alpha.2
   - Fixed last capture sensor icon (corrected typo from `mdi:fast-run` to valid MDI icon `mdi:run-fast`).
   - Added dynamic trigger icon resolution on last capture sensor (`mdi:run-fast` for motion, `mdi:bell-ring` for alarm, `mdi:calendar-clock` for schedule).
