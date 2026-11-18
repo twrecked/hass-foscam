@@ -1,5 +1,13 @@
 Unreleased
 
+0.1.0-alpha.4
+  - Save new downloads under `/media/foscam/<camera-name>` by default, or under
+    `foscam/<camera-name>` in Home Assistant's configured local media directory.
+    Existing files in `/config/foscam` are not moved automatically.
+  - Add a per-camera Recording retention (days) option (1–365 days, default 30).
+    It sets both the scan and download window and the age limit for daily
+    cleanup of local copies. Recordings on the camera's SD card are not deleted.
+
 0.1.0-alpha.3
   - Added new Switch platform (`switch.py`) providing native async switches:
     - Sleep mode (`switch.<camera>_sleep`)

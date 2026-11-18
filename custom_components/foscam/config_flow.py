@@ -5,7 +5,7 @@ from typing import Any
 
 import voluptuous as vol
 from homeassistant import config_entries, exceptions
-from homeassistant.config_entries import ConfigFlowResult
+from homeassistant.config_entries import ConfigFlowResult, OptionsFlow
 from homeassistant.const import (
     CONF_HOST,
     CONF_NAME,
@@ -13,6 +13,7 @@ from homeassistant.const import (
     CONF_PORT,
     CONF_USERNAME,
 )
+from homeassistant.core import callback
 from homeassistant.data_entry_flow import AbortFlow
 
 from foscam import (
@@ -22,7 +23,14 @@ from foscam import (
     FoscamError,
 )
 
-from .const import CONF_RTSP_PORT, CONF_STREAM, DOMAIN, LOGGER
+from .const import (
+    CONF_RETENTION_DAYS,
+    CONF_RTSP_PORT,
+    CONF_STREAM,
+    DEFAULT_RETENTION_DAYS,
+    DOMAIN,
+    LOGGER,
+)
 
 STREAMS = ["Main", "Sub"]
 
@@ -47,6 +55,14 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for foscam."""
 
     VERSION = 2
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(
+        config_entry: config_entries.ConfigEntry,
+    ) -> OptionsFlow:
+        """Create options flow handler."""
+        return FoscamOptionsFlowHandler(config_entry)
 
     async def _validate_and_create(self, data: dict[str, Any]) -> ConfigFlowResult:
         """Validate the user input allows us to connect.
@@ -149,6 +165,37 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "Error importing foscam platform config: unexpected exception"
             )
             return self.async_abort(reason="unknown")
+
+
+class FoscamOptionsFlowHandler(OptionsFlow):
+    """Handle options flow for Foscam."""
+
+    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
+        """Initialize options flow."""
+        self._config_entry = config_entry
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Manage options."""
+        if user_input is not None:
+            return self.async_create_entry(title="", data=user_input)
+
+        current_retention = self._config_entry.options.get(
+            CONF_RETENTION_DAYS,
+            self._config_entry.data.get(CONF_RETENTION_DAYS, DEFAULT_RETENTION_DAYS),
+        )
+
+        options_schema = vol.Schema(
+            {
+                vol.Required(
+                    CONF_RETENTION_DAYS,
+                    default=current_retention,
+                ): vol.All(vol.Coerce(int), vol.Range(min=1, max=365)),
+            }
+        )
+
+        return self.async_show_form(step_id="init", data_schema=options_schema)
 
 
 class CannotConnect(exceptions.HomeAssistantError):
