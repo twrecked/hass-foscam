@@ -1,5 +1,10 @@
 Unreleased
 
+0.1.0-alpha.2
+  - Fixed last capture sensor icon (corrected typo from `mdi:fast-run` to valid MDI icon `mdi:run-fast`).
+  - Added dynamic trigger icon resolution on last capture sensor (`mdi:run-fast` for motion, `mdi:bell-ring` for alarm, `mdi:calendar-clock` for schedule).
+  - Added rich metadata attributes to last capture sensor (`clip_id`, `trigger`, `duration`, `video_url`, `thumbnail_url`).
+
 0.1.0-alpha.1
   - Initial alpha release of modernized foscam component
   - Native async coordinator and entity actions using pyfoscam
