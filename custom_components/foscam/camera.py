@@ -36,9 +36,11 @@ from .const import (
     CONF_STREAM,
     DOMAIN,
     LOGGER,
+    SERVICE_FOCUS,
     SERVICE_PRUNE_RECORDINGS,
     SERVICE_PTZ,
     SERVICE_PTZ_PRESET,
+    SERVICE_ZOOM,
 )
 from .updater import Updater
 
@@ -62,6 +64,8 @@ DIR_TOPRIGHT = "top_right"
 DIR_BOTTOMLEFT = "bottom_left"
 DIR_BOTTOMRIGHT = "bottom_right"
 
+DIR_STOP = "stop"
+
 VALID_MOVEMENTS = [
     DIR_UP,
     DIR_DOWN,
@@ -71,10 +75,20 @@ VALID_MOVEMENTS = [
     DIR_TOPRIGHT,
     DIR_BOTTOMLEFT,
     DIR_BOTTOMRIGHT,
+    DIR_STOP,
 ]
+
+ZOOM_IN = "in"
+ZOOM_OUT = "out"
+VALID_ZOOM_DIRECTIONS = [ZOOM_IN, ZOOM_OUT, DIR_STOP]
+
+FOCUS_NEAR = "near"
+FOCUS_FAR = "far"
+VALID_FOCUS_DIRECTIONS = [FOCUS_NEAR, FOCUS_FAR, DIR_STOP]
 
 DEFAULT_TRAVELTIME = 0.125
 
+ATTR_DIRECTION = "direction"
 ATTR_MOVEMENT = "movement"
 ATTR_TRAVELTIME = "travel_time"
 ATTR_PRESET_NAME = "preset_name"
@@ -151,6 +165,24 @@ async def async_setup_entry(
                 vol.Required(ATTR_PRESET_NAME): cv.string,
             },
             "async_perform_ptz_preset",
+        )
+
+        platform.async_register_entity_service(
+            SERVICE_ZOOM,
+            {
+                vol.Required(ATTR_DIRECTION): vol.In(VALID_ZOOM_DIRECTIONS),
+                vol.Optional(ATTR_TRAVELTIME, default=DEFAULT_TRAVELTIME): cv.small_float,
+            },
+            "async_perform_zoom",
+        )
+
+        platform.async_register_entity_service(
+            SERVICE_FOCUS,
+            {
+                vol.Required(ATTR_DIRECTION): vol.In(VALID_FOCUS_DIRECTIONS),
+                vol.Optional(ATTR_TRAVELTIME, default=DEFAULT_TRAVELTIME): cv.small_float,
+            },
+            "async_perform_focus",
         )
 
         platform.async_register_entity_service(
@@ -267,9 +299,34 @@ class HassFoscamCamera(CoordinatorEntity[Updater], Camera):
         """Perform a PTZ action on the camera."""
         LOGGER.debug("PTZ action '%s' on %s (travel_time=%.2f)", movement, self._name, travel_time)
         try:
-            await self._foscam_session.ptz(movement, travel_time)
+            if movement.lower() == DIR_STOP:
+                await self._foscam_session.ptz_stop()
+            else:
+                await self._foscam_session.ptz(movement, travel_time)
         except (FoscamError, TimeoutError, OSError) as err:
             LOGGER.error("Error moving %s '%s': %s", movement, self._name, err)
+
+    async def async_perform_zoom(self, direction: str, travel_time: float) -> None:
+        """Perform an optical zoom action on the camera."""
+        LOGGER.debug("Zoom action '%s' on %s (travel_time=%.2f)", direction, self._name, travel_time)
+        try:
+            if direction.lower() == DIR_STOP:
+                await self._foscam_session.zoom_stop()
+            else:
+                await self._foscam_session.zoom(direction, travel_time)
+        except (FoscamError, TimeoutError, OSError) as err:
+            LOGGER.error("Error zooming %s '%s': %s", direction, self._name, err)
+
+    async def async_perform_focus(self, direction: str, travel_time: float) -> None:
+        """Perform a manual focus action on the camera."""
+        LOGGER.debug("Focus action '%s' on %s (travel_time=%.2f)", direction, self._name, travel_time)
+        try:
+            if direction.lower() == DIR_STOP:
+                await self._foscam_session.focus_stop()
+            else:
+                await self._foscam_session.focus(direction, travel_time)
+        except (FoscamError, TimeoutError, OSError) as err:
+            LOGGER.error("Error focusing %s '%s': %s", direction, self._name, err)
 
     async def async_perform_ptz_preset(self, preset_name: str) -> None:
         """Perform a PTZ preset action on the camera."""
