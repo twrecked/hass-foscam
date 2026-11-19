@@ -1,58 +1,144 @@
 ptz:
-  description: Pan/Tilt service for Foscam camera.
+  description: Pan/Tilt/Stop service for Foscam camera.
+  target:
+    entity:
+      integration: foscam
+      domain: camera
   fields:
-    entity_id:
-      description: Name(s) of entities to move.
-      example: "camera.living_room_camera"
     movement:
-      description: "Direction of the movement. Allowed values: up, down, left, right, top_left, top_right, bottom_left, bottom_right."
+      description: "Direction of movement."
+      required: true
       example: "up"
+      selector:
+        select:
+          options:
+            - label: Up
+              value: "up"
+            - label: Down
+              value: "down"
+            - label: Left
+              value: "left"
+            - label: Right
+              value: "right"
+            - label: Top Left
+              value: "top_left"
+            - label: Top Right
+              value: "top_right"
+            - label: Bottom Left
+              value: "bottom_left"
+            - label: Bottom Right
+              value: "bottom_right"
+            - label: Stop
+              value: "stop"
     travel_time:
       description: "(Optional) Travel time in seconds. Allowed values: float from 0 to 1. Default: 0.125"
+      required: false
+      default: 0.125
       example: 0.125
+      selector:
+        number:
+          min: 0.0
+          max: 1.0
+          step: 0.025
+          unit_of_measurement: seconds
+          mode: box
 
 ptz_preset:
   description: PTZ Preset service for Foscam camera.
+  target:
+    entity:
+      integration: foscam
+      domain: camera
   fields:
-    entity_id:
-      description: Name(s) of entities to move.
-      example: "camera.living_room_camera"
     preset_name:
-      description: "The name of the preset to move to.  Presets can be created from within the official Foscam apps."
+      description: "The name of the preset point to move to. Presets can be created from within the official Foscam apps."
+      required: true
       example: "TopMost"
+      selector:
+        text:
 
 zoom:
   description: Optical zoom service for Foscam camera.
+  target:
+    entity:
+      integration: foscam
+      domain: camera
   fields:
-    entity_id:
-      description: Name(s) of entities to zoom.
-      example: "camera.living_room_camera"
     direction:
-      description: "Direction of the zoom. Allowed values: in, out, stop."
+      description: "Direction of zoom."
+      required: true
       example: "in"
+      selector:
+        select:
+          options:
+            - label: In
+              value: "in"
+            - label: Out
+              value: "out"
+            - label: Stop
+              value: "stop"
     travel_time:
-      description: "(Optional) Travel time in seconds. Allowed values: float from 0 to 1. Default: 0.125"
+      description: "(Optional) Travel time in seconds (in/out only). Allowed values: float from 0 to 1. Default: 0.125"
+      required: false
+      default: 0.125
       example: 0.125
+      selector:
+        number:
+          min: 0.0
+          max: 1.0
+          step: 0.025
+          unit_of_measurement: seconds
+          mode: box
 
 focus:
   description: Manual focus service for Foscam camera.
+  target:
+    entity:
+      integration: foscam
+      domain: camera
   fields:
-    entity_id:
-      description: Name(s) of entities to focus.
-      example: "camera.living_room_camera"
     direction:
-      description: "Direction of focus. Allowed values: near, far, stop."
+      description: "Direction of focus."
+      required: true
       example: "near"
+      selector:
+        select:
+          options:
+            - label: Near
+              value: "near"
+            - label: Far
+              value: "far"
+            - label: Stop
+              value: "stop"
     travel_time:
-      description: "(Optional) Travel time in seconds. Allowed values: float from 0 to 1. Default: 0.125"
+      description: "(Optional) Travel time in seconds (near/far only). Allowed values: float from 0 to 1. Default: 0.125"
+      required: false
+      default: 0.125
       example: 0.125
+      selector:
+        number:
+          min: 0.0
+          max: 1.0
+          step: 0.025
+          unit_of_measurement: seconds
+          mode: box
 
 prune_recordings:
   description: Delete expired local downloaded recordings and thumbnails.
+  target:
+    entity:
+      integration: foscam
+      domain: camera
   fields:
-    entity_id:
-      description: Name(s) of camera entities to prune.
-      example: "camera.living_room_camera"
     days:
       description: "(Optional) Retention period in days; files older than this will be deleted. Default: 30"
+      required: false
+      default: 30
       example: 30
+      selector:
+        number:
+          min: 1
+          max: 365
+          step: 1
+          unit_of_measurement: days
+          mode: box
