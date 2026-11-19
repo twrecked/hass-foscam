@@ -1,5 +1,13 @@
 Unreleased
 
+0.1.0-alpha.5
+  - Added native async entity services for optical zoom and focus:
+    - `foscam.zoom`: optical zoom (in, out, stop) with configurable travel time
+    - `foscam.focus`: manual lens focus (near, far, stop) with configurable travel time
+    - Added support for "stop" in `foscam.ptz`
+  - Updated all entity services (`ptz`, `ptz_preset`, `zoom`, `focus`, `prune_recordings`) in `services.yaml` with explicit entity targets (`target.entity: integration: foscam, domain: camera`) and UI select/number selectors for native Home Assistant Action UI support.
+  - Pinned requirement to `pyfoscam v0.1.0-alpha.3`.
+
 0.1.0-alpha.4
   - Save new downloads under `/media/foscam/<camera-name>` by default, or under
     `foscam/<camera-name>` in Home Assistant's configured local media directory.
