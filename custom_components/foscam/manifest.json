@@ -4,12 +4,12 @@
   "config_flow": true,
   "documentation": "https://www.home-assistant.io/integrations/foscam",
   "requirements": [
-    "pyfoscam @ git+https://github.com/twrecked/pyfoscam.git@v0.1.0-alpha.3"
+    "pyfoscam @ git+https://github.com/twrecked/pyfoscam.git@v0.1.0-alpha.4"
   ],
   "codeowners": [
     "@twrecked",
     "@skgsergio"
   ],
-  "version": "0.1.0-alpha.5",
+  "version": "0.1.0-alpha.6",
   "iot_class": "local_polling"
 }

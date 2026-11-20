@@ -1,5 +1,8 @@
 Unreleased
 
+0.1.0-alpha.6
+  - Pin pyfoscam to v0.1.0-alpha.4 for recording size checks, validated MP4 downloads, and a fix for Home Assistant's blocking scandir() warning.
+
 0.1.0-alpha.5
   - Added native async entity services for optical zoom and focus:
     - `foscam.zoom`: optical zoom (in, out, stop) with configurable travel time
